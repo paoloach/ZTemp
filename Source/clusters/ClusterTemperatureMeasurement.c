@@ -67,21 +67,21 @@ __sfr __no_init volatile union {
 
 #define ENABLE_P1EN st( IEN2 |= 0x10;)
 #define DISABLE_P1EN st(IEN2 &= 0xEF;);
-#define ENABLE_P1_2_INT  st(IEN2 |= 0x10; P1IEN |= 0x04;)
-#define DISABLE_P1_2_INT  st(P1IEN &= 0xFB;)
-#define P1_2_RISING_INT st(PICTL &= 0xFD;)
-#define P1_2_FALLING_INT st(PICTL |= 0x02;)
+#define ENABLE_P1_5_INT  st(IEN2 |= 0x10; P1IEN |= 0x20;)
+#define DISABLE_P1_5_INT  st(P1IEN &= 0xDF;)
+#define P1_5_RISING_INT st(PICTL &= 0xFD;)
+#define P1_5_FALLING_INT st(PICTL |= 0x02;)
 
 #define STOP_T3 st(T3CNT &= 0xEF;);
 #define START_T3 st(T3CNT |= 0x10;);
-#define P1_LOW st(P1DIR  |= 0x04;);
-#define P1_HIGH st(P1DIR &= 0xFB;);
+#define P1_LOW st(P1DIR  |= 0x20;);
+#define P1_HIGH st(P1DIR &= 0xDF;);
 
 #define ENABLE_T3_CH0_INT  T3CCTL0_im = 1;
 #define DISABLE_T3_CH0_INT T3CCTL0_im=0;
 #define RESET_TM3   st(T3CNT=0;)
 #define RESET_T3CH0_INT st(T3CH0IF=0;)
-#define RESET_P1_2_INT st(P1IF=0; P1IFG =0;);
+#define RESET_P1_5_INT st(P1IF=0; P1IFG =0;);
 
 
 
@@ -95,7 +95,7 @@ uint16 toleranceTemperature=10;
 
 static void write(unsigned char byte);
 static uint8  read(void);
-static void readSyncronus(void);
+static void startReadSyncronus(void);
 static uint8 reset(void);
 static void finalizeReadTemp(void);
 
@@ -105,16 +105,17 @@ extern devStates_t devState;
 
 #define TIME_READ_ms 10*1000
 
+// ---------------------------
+// P1_5 data
+// P1_0 enable
+
 void clusterTemperatureMeasurementeInit(void) {
-	P1SEL &=0xFB;
-	P1DIR &= 0xFB;
-	P1_2 = 0;
-	
-//	T3CTL = 0x04 | 0xA0; //Clear counter. interrupt disable. Compare mode. 4us at cycle
-//	T3CCTL0 = 0x4; // compare mode
-//	T3CCTL1 = 0;
-//	P0DIR=0xFF;
-//	P0=0;
+	P1SEL &=0xDE;
+	P1DIR &= 0xDF;
+	P1DIR |= 0x01;
+	P1_0=0;
+	P1_5 = 0;
+
 	readTemperature();
 	osal_start_timerEx( temperatureSensorTaskID, READ_TEMP_EVT, TIME_READ_ms );
 }
@@ -152,6 +153,10 @@ uint16 readTemperatureLoop(uint16 events) {
 		readTemperature();
 		return ( events ^ READ_TEMP_EVT );
 	};
+	if (events & START_READ_TEMP){
+		startReadSyncronus();
+		return ( events ^ START_READ_TEMP );
+	};
 	if (events & END_READ_TEMP_EVT){
 		finalizeReadTemp();
 		return ( events ^ END_READ_TEMP_EVT );
@@ -160,48 +165,38 @@ uint16 readTemperatureLoop(uint16 events) {
 }
 
 void readTemperature(void) {
+	P1_0=1;
 	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_HOLD);
-#if 1
-	readSyncronus();
-//	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);
-#else
-	readAsyncronus();
-#endif
+	osal_start_timerEx( temperatureSensorTaskID, START_READ_TEMP, 100 );
 	osal_start_timerEx( temperatureSensorTaskID, READ_TEMP_EVT, TIME_READ_ms );
 }
 
-void readSyncronus(void) {
+void startReadSyncronus(void) {
 
-	P1SEL &=0xFB;
-	P1DIR &= 0xFB;
-	P1_2 = 0;
+	P1SEL &=0xDF;
+	P1DIR &= 0xDF;
+	P1_5 = 0;
 	
 	T3CTL = 0x04 | 0xA0; //Clear counter. interrupt disable. Compare mode. 4us at cycle
 	T3CCTL0 = 0x4; // compare mode
 	T3CCTL1 = 0;
 	P0DIR=0xFF;
 		
-	DISABLE_P1_2_INT;
+	DISABLE_P1_5_INT;
 	T3IF=0;
 	T3CH0IF=0;
 	st(T3IE=0;);
-	if (reset()==0)
+		
+	if (reset()==0){
+		P1_0=0; 
+		osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);
 		return;
+	}
 	
 	write(0xCC);
 	write(0x44);
 	
-	osal_start_timerEx( temperatureSensorTaskID, END_READ_TEMP_EVT, 750 );
-	
-	/*
-	T3_div=7;
-	for(uint16 i=0; i < 750; i++){
-		T3_clear=1;
-		while(T3CNT < 250);
-		
-	}
-	finalizeReadTemp();
-	*/
+	osal_start_timerEx( temperatureSensorTaskID, END_READ_TEMP_EVT, 1000 );
 }
 
 void finalizeReadTemp(void){
@@ -218,6 +213,7 @@ void finalizeReadTemp(void){
 	decTemperatureValue = (tempTemperatureValue & 0x0F)*100;
 	
 	temperatureValue += decTemperatureValue >> 4;
+	P1_0=0;  //P1_0=0
 	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);
 }
 
@@ -231,12 +227,12 @@ uint8 reset() {
 	T3_clear=1;
 	while(T3CNT < 30);
 	T3_clear=1;
-	while(T3CNT < 240  && P1_2 == 1);
+	while(T3CNT < 240  && P1_5 == 1);
 	
-	if (P1_2 == 1){
+	if (P1_5 == 1){
 		return 0;
 	}
-	while(P1_2==0);
+	while(P1_5==0);
 	return 1;
 }
 
@@ -283,7 +279,7 @@ uint8  read(void) {
 		T3_clear=1;
 		while(T3CNT < 10);
 		result >>= 1;
-		if (P1_2){
+		if (P1_5){
 			result |= 0x80;
 		}
 		T3_clear=1;

@@ -15,7 +15,8 @@
 #define LEVEL_MOVEMENT           0x0002
 #define READ_TEMP_EVT	         0x0004
 #define END_READ_TEMP_EVT        0x0008
-#define READ_TEMP_MASK	         0x000C
+#define START_READ_TEMP			 0x0010
+#define READ_TEMP_MASK	         0x001C
 
   
 #endif
