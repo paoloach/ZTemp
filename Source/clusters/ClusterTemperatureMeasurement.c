@@ -50,6 +50,17 @@ __sfr __no_init volatile union {
 	};
 } @ 0x9A
 
+__sfr __no_init volatile struct  {
+	unsigned char DIR1_0: 1;
+	unsigned char DIR1_1: 1;
+	unsigned char DIR1_2: 1;
+	unsigned char DIR1_3: 1;
+	unsigned char DIR1_4: 1;
+	unsigned char DIR1_5: 1;
+	unsigned char DIR1_6: 1;
+	unsigned char DIR1_7: 1;
+} @ 0xFE;
+
 
 #define WAIT_FOR_480us 	T3_start=0;		T3CC0=240;T3_clear=1; T3_start=1;
 #define WAIT_FOR_2us T3_start=0;		T3CC0=8; T3_clear=1;T3_start=1;
@@ -67,15 +78,13 @@ __sfr __no_init volatile union {
 
 #define ENABLE_P1EN st( IEN2 |= 0x10;)
 #define DISABLE_P1EN st(IEN2 &= 0xEF;);
-#define ENABLE_P1_5_INT  st(IEN2 |= 0x10; P1IEN |= 0x20;)
+
 #define DISABLE_P1_5_INT  st(P1IEN &= 0xDF;)
-#define P1_5_RISING_INT st(PICTL &= 0xFD;)
-#define P1_5_FALLING_INT st(PICTL |= 0x02;)
 
 #define STOP_T3 st(T3CNT &= 0xEF;);
 #define START_T3 st(T3CNT |= 0x10;);
-#define P1_LOW st(P1DIR  |= 0x20;);
-#define P1_HIGH st(P1DIR &= 0xDF;);
+#define P1_LOW DIR1_0=1; P1_0 = 0;
+#define P1_HIGH DIR1_0=0;
 
 #define ENABLE_T3_CH0_INT  T3CCTL0_im = 1;
 #define DISABLE_T3_CH0_INT T3CCTL0_im=0;
@@ -106,15 +115,15 @@ extern devStates_t devState;
 #define TIME_READ_ms 10*1000
 
 // ---------------------------
-// P1_5 data
-// P1_0 enable
+// P1_0 data
+// P1_5 enable
 
 void clusterTemperatureMeasurementeInit(void) {
 	P1SEL &=0xDE;
-	P1DIR &= 0xDF;
-	P1DIR |= 0x01;
-	P1_0=0;
-	P1_5 = 0;
+	DIR1_0 = 0;
+	DIR1_5 = 1;
+	P1_5=0;
+	P1_0 = 0;
 
 	readTemperature();
 	osal_start_timerEx( temperatureSensorTaskID, READ_TEMP_EVT, TIME_READ_ms );
@@ -165,17 +174,14 @@ uint16 readTemperatureLoop(uint16 events) {
 }
 
 void readTemperature(void) {
-	P1_0=1;
+	P1_5=1;
 	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_HOLD);
 	osal_start_timerEx( temperatureSensorTaskID, START_READ_TEMP, 100 );
 	osal_start_timerEx( temperatureSensorTaskID, READ_TEMP_EVT, TIME_READ_ms );
 }
 
 void startReadSyncronus(void) {
-
-	P1SEL &=0xDF;
-	P1DIR &= 0xDF;
-	P1_5 = 0;
+	P1_5 = 1;
 	
 	T3CTL = 0x04 | 0xA0; //Clear counter. interrupt disable. Compare mode. 4us at cycle
 	T3CCTL0 = 0x4; // compare mode
@@ -188,7 +194,7 @@ void startReadSyncronus(void) {
 	st(T3IE=0;);
 		
 	if (reset()==0){
-		P1_0=0; 
+		P1_5=0; 
 		osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);
 		return;
 	}
@@ -213,26 +219,32 @@ void finalizeReadTemp(void){
 	decTemperatureValue = (tempTemperatureValue & 0x0F)*100;
 	
 	temperatureValue += decTemperatureValue >> 4;
-	P1_0=0;  //P1_0=0
+	P1_5=0;  //P1_0=0
 	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);
 }
 
 uint8 reset() {
+	
 	P1_LOW;
-	T3_div=6;
+	
+	T3_div=7;
 	T3_clear=1;
+	T3CNT=0;
 	T3_start=1;
 	while(T3CNT < 244);
+	T3_start=0;
+	
 	P1_HIGH;
 	T3_clear=1;
+	T3_start=1;
 	while(T3CNT < 30);
 	T3_clear=1;
-	while(T3CNT < 240  && P1_5 == 1);
+	while(T3CNT < 240  && P1_0 == 1);
 	
-	if (P1_5 == 1){
+	if (P1_0 == 1){
 		return 0;
 	}
-	while(P1_5==0);
+	while(P1_0==0);
 	return 1;
 }
 
@@ -279,7 +291,7 @@ uint8  read(void) {
 		T3_clear=1;
 		while(T3CNT < 10);
 		result >>= 1;
-		if (P1_5){
+		if (P1_0){
 			result |= 0x80;
 		}
 		T3_clear=1;
