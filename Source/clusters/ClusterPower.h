@@ -12,5 +12,9 @@
 #include "zclReadAttributeFn.h"
 	
 void powerClusterReadAttribute(zclAttrRec_t *);
+void powerClusterInit(byte appId);
+void powerClusterCheckBattery(byte appId);
+
+
 
 #endif

@@ -112,19 +112,24 @@ static void finalizeReadTemp(void);
 extern byte temperatureSensorTaskID;
 extern devStates_t devState;
 
-#define TIME_READ_ms 10*1000
+#define TIME_READ_ms 30*1000
+#define MINUTES_BETWEEN 5
+uint8 countMinutes=0;
 
 // ---------------------------
 // P1_0 data
 // P1_5 enable
 
 void clusterTemperatureMeasurementeInit(void) {
-	P1SEL &=0xDE;
+	P1SEL &=0xCE;
 	DIR1_0 = 0;
 	DIR1_5 = 1;
+	DIR1_4 = 1;
 	P1_5=0;
+	P1_4=0;
 	P1_0 = 0;
 
+	countMinutes = 2*MINUTES_BETWEEN;
 	readTemperature();
 	osal_start_timerEx( temperatureSensorTaskID, READ_TEMP_EVT, TIME_READ_ms );
 }
@@ -174,15 +179,20 @@ uint16 readTemperatureLoop(uint16 events) {
 }
 
 void readTemperature(void) {
-	P1_5=1;
-	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_HOLD);
-	osal_start_timerEx( temperatureSensorTaskID, START_READ_TEMP, 100 );
+	countMinutes++;
+	if (countMinutes >= 2*MINUTES_BETWEEN){
+		P1_5=1;
+		P1_4=1;
+		osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_HOLD);
+		osal_start_timerEx( temperatureSensorTaskID, START_READ_TEMP, 100 );
+		countMinutes=0;
+	}
 	osal_start_timerEx( temperatureSensorTaskID, READ_TEMP_EVT, TIME_READ_ms );
 }
 
 void startReadSyncronus(void) {
 	P1_5 = 1;
-	
+	P1_4=1;
 	T3CTL = 0x04 | 0xA0; //Clear counter. interrupt disable. Compare mode. 4us at cycle
 	T3CCTL0 = 0x4; // compare mode
 	T3CCTL1 = 0;
@@ -195,6 +205,7 @@ void startReadSyncronus(void) {
 		
 	if (reset()==0){
 		P1_5=0; 
+		P1_4=0;
 		osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);
 		return;
 	}
@@ -219,7 +230,8 @@ void finalizeReadTemp(void){
 	decTemperatureValue = (tempTemperatureValue & 0x0F)*100;
 	
 	temperatureValue += decTemperatureValue >> 4;
-	P1_5=0;  //P1_0=0
+	P1_5=0;  
+	P1_4=0;
 	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);
 }
 

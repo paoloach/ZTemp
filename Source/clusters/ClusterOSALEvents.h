@@ -17,6 +17,7 @@
 #define END_READ_TEMP_EVT        0x0008
 #define START_READ_TEMP			 0x0010
 #define READ_TEMP_MASK	         0x001C
+#define READ_BATTERY_LEVEL		 0x0020
 
   
 #endif

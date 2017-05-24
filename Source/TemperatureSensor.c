@@ -68,6 +68,7 @@ void temperatureSensorInit( byte task_id ){
   
   	EA=1;
   	clusterTemperatureMeasurementeInit();
+	powerClusterInit(temperatureSensorTaskID);
  	identifyInit(temperatureSensorTaskID);
 	ZMacSetTransmitPower(TX_PWR_PLUS_3);
 	fastBlinkOn();
@@ -111,6 +112,11 @@ uint16 temperatureSensorEventLoop( uint8 task_id, uint16 events ){
 	
 	if ( events & IDENTIFY_TIMEOUT_EVT ) {
 		return identifyLoop(events);
+	}
+	
+	if ( events & READ_BATTERY_LEVEL ) {
+		powerClusterCheckBattery(task_id);
+		events = events ^ READ_BATTERY_LEVEL;
 	}
 	
 	if ( events & READ_TEMP_MASK ) {
