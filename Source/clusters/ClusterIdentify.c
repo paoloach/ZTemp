@@ -18,7 +18,7 @@
 #define ON_TIME 600
 #define OFF_TIME 400
 
-#define FAST_BLINK_TIME 100
+
 
 static uint16 identifyTime=0;
 
@@ -26,7 +26,6 @@ static byte mainAppTaskId;
 
 #define OFF 0
 #define  ON 1
-#define FAST_BLINK 2
 
 static uint8  onOff=OFF;
 
@@ -105,28 +104,12 @@ uint16 identifyLoop(uint16 events){
 			osal_pwrmgr_task_state(mainAppTaskId, PWRMGR_CONSERVE);
 			P0_0 = 0;
 		}
-	} else if (onOff == FAST_BLINK){
-		if (P0_0)
-			P0_0 = 0;
-		else
-			P0_0 = 1;
-		osal_start_timerEx( mainAppTaskId, IDENTIFY_TIMEOUT_EVT, FAST_BLINK_TIME );
-	}
+	} 
     return ( events ^ IDENTIFY_TIMEOUT_EVT );
 }
 
 
-void fastBlinkOn(void){
-	onOff = FAST_BLINK;
-	osal_start_timerEx( mainAppTaskId, IDENTIFY_TIMEOUT_EVT, FAST_BLINK_TIME );
-	P0_0 = 1;
-}
-			   
-void fastBlinkOff(void){
-	onOff = OFF;
-	osal_stop_timerEx( mainAppTaskId, IDENTIFY_TIMEOUT_EVT );
-	P0_0 = 0;
-}
+
 
 void processIdentifyTimeChange( void ){
 	if ( identifyTime > 0 ) {

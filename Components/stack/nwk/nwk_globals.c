@@ -476,68 +476,6 @@ void NIB_init()
  */
 void nwk_Status( uint16 statusCode, uint16 statusValue )
 {
-#if defined ( LCD_SUPPORTED )
-  switch ( statusCode )
-  {
-    case NWK_STATUS_COORD_ADDR:
-      if ( ZSTACK_ROUTER_BUILD )
-      {
-        HalLcdWriteString( (char*)ZigbeeCoordStr, HAL_LCD_LINE_1 );
-        HalLcdWriteStringValue( (char*)NetworkIDStr, statusValue, 16, HAL_LCD_LINE_2 );
-        BuzzerControl( BUZZER_BLIP );
-      }
-      break;
-
-    case NWK_STATUS_ROUTER_ADDR:
-      if ( ZSTACK_ROUTER_BUILD )
-      {
-        HalLcdWriteStringValue( (char*)RouterStr, statusValue, 16, HAL_LCD_LINE_1 );
-      }
-      break;
-
-    case NWK_STATUS_ORPHAN_RSP:
-      if ( ZSTACK_ROUTER_BUILD )
-      {
-        if ( statusValue == ZSuccess )
-          HalLcdWriteScreen( (char*)OrphanRspStr, (char*)SentStr );
-        else
-          HalLcdWriteScreen( (char*)OrphanRspStr, (char*)FailedStr );
-      }
-      break;
-
-    case NWK_ERROR_ASSOC_RSP:
-      if ( ZSTACK_ROUTER_BUILD )
-      {
-        HalLcdWriteString( (char*)AssocRspFailStr, HAL_LCD_LINE_1 );
-        HalLcdWriteValue( (uint32)(statusValue), 16, HAL_LCD_LINE_2 );
-      }
-      break;
-
-    case NWK_STATUS_ED_ADDR:
-      if ( ZSTACK_END_DEVICE_BUILD )
-      {
-        HalLcdWriteStringValue( (char*)EndDeviceStr, statusValue, 16, HAL_LCD_LINE_1 );
-      }
-      break;
-
-    case NWK_STATUS_PARENT_ADDR:
-            HalLcdWriteStringValue( (char*)ParentStr, statusValue, 16, HAL_LCD_LINE_2 );
-      break;
-
-    case NWK_STATUS_ASSOC_CNF:
-      HalLcdWriteScreen( (char*)AssocCnfStr, (char*)SuccessStr );
-      break;
-
-    case NWK_ERROR_ASSOC_CNF_DENIED:
-      HalLcdWriteString((char*)AssocCnfFailStr, HAL_LCD_LINE_1 );
-      HalLcdWriteValue( (uint32)(statusValue), 16, HAL_LCD_LINE_2 );
-      break;
-
-    case NWK_ERROR_ENERGY_SCAN_FAILED:
-      HalLcdWriteScreen( (char*)EnergyLevelStr, (char*)ScanFailedStr );
-      break;
-  }
-#endif
 }
 
 /*********************************************************************
