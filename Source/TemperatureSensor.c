@@ -99,7 +99,7 @@ void temperatureSensorInit( byte task_id ){
   	clusterTemperatureMeasurementeInit();
 	powerClusterInit(temperatureSensorTaskID);
  	identifyInit(temperatureSensorTaskID);
-	ZMacSetTransmitPower(TX_PWR_PLUS_10);
+	ZMacSetTransmitPower(TX_PWR_ZERO);
 	DIR0_1 = 1;
  	P0SEL_1 = 0;
  	P0_1 = 0;
@@ -159,10 +159,10 @@ uint16 temperatureSensorEventLoop( uint8 task_id, uint16 events ){
 	if ( events & FAST_BLINK ) {
 		if (P0_1){
 			P0_1 = 0;
-			osal_start_timerEx( temperatureSensorTaskID, IDENTIFY_TIMEOUT_EVT, FAST_BLINK_TIME_OFF );
+			osal_start_timerEx( temperatureSensorTaskID, FAST_BLINK, FAST_BLINK_TIME_OFF );
 		}else{
 			P0_1 = 1;
-			osal_start_timerEx( temperatureSensorTaskID, IDENTIFY_TIMEOUT_EVT, FAST_BLINK_TIME_ON );
+			osal_start_timerEx( temperatureSensorTaskID, FAST_BLINK, FAST_BLINK_TIME_ON );
 		}
 		
 		return events ^ FAST_BLINK;
