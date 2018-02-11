@@ -99,7 +99,8 @@ void temperatureSensorInit( byte task_id ){
   	clusterTemperatureMeasurementeInit();
 	powerClusterInit(temperatureSensorTaskID);
  	identifyInit(temperatureSensorTaskID);
-	ZMacSetTransmitPower(TX_PWR_ZERO);
+	//ZMacSetTransmitPower(TX_PWR_PLUS_19);
+	ZMacSetTransmitPower(POWER);
 	DIR0_1 = 1;
  	P0SEL_1 = 0;
  	P0_1 = 0;
