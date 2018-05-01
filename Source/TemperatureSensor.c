@@ -23,20 +23,19 @@
 #include "zcl.h"
 #include "zcl_general.h"
 #include "zcl_ha.h"
+#include "bdb_interface.h"
 
 #include "TemperatureSensor.h"
 
 #include "onboard.h"
 
-/* HAL */
-#include "hal_lcd.h"
-#include "hal_led.h"
-#include "hal_key.h"
-
 #include "clusters/ClusterIdentify.h"
 #include "clusters/ClusterBasic.h"
 #include "clusters/ClusterTemperatureMeasurement.h"
 #include "clusters/ClusterPower.h"
+
+
+#include "APS_Fragments.h"
 
 #define FAST_BLINK_TIME_ON 100	 
 #define FAST_BLINK_TIME_OFF 1000	 
@@ -50,6 +49,8 @@ static uint8 processInReadRspCmd( zclIncomingMsg_t *pInMsg );
 static uint8 processInWriteRspCmd( zclIncomingMsg_t *pInMsg );
 static uint8 processInDefaultRspCmd( zclIncomingMsg_t *pInMsg );
 static void fastBlinkOn(void);
+static void commissioningStatus(bdbCommissioningModeMsg_t *bdbCommissioningModeMsg);
+static void filterNwkDesc(networkDesc_t *pBDBListNwk, uint8 count);
 			   
 static void fastBlinkOff(void);
 #ifdef ZCL_DISCOVER
@@ -79,13 +80,15 @@ __sfr __no_init volatile struct  {
 	unsigned char P0SEL_7: 1;
 } @ 0xF3;
 
+zclOptionRec_t options[] = {ZCL_CLUSTER_ID_GEN_BASIC,AF_EN_SECURITY};
 
 void temperatureSensorInit( byte task_id ){
  	temperatureSensorTaskID = task_id;
 
    	zcl_registerPlugin( ZCL_CLUSTER_ID_GEN_BASIC,  ZCL_CLUSTER_ID_GEN_MULTISTATE_VALUE_BASIC,    handleClusterCommands );
   
-	zclHA_Init( &temperatureSimpleDesc );
+	//zclHA_Init( &temperatureSimpleDesc );
+	bdb_RegisterSimpleDescriptor(&temperatureSimpleDesc);
 	addReadAttributeFn(ENDPOINT, ZCL_CLUSTER_ID_GEN_BASIC,basicClusterReadAttribute);
 	addWriteAttributeFn(ENDPOINT, ZCL_CLUSTER_ID_GEN_BASIC,basicClusterWriteAttribute);
 	addReadAttributeFn(ENDPOINT, ZCL_CLUSTER_ID_GEN_IDENTIFY,identifyClusterReadAttribute);
@@ -94,9 +97,15 @@ void temperatureSensorInit( byte task_id ){
 	addReadAttributeFn(ENDPOINT,ZCL_CLUSTER_ID_MS_TEMPERATURE_MEASUREMENT,temperatureClusterReadAttribute);
 
   	zcl_registerForMsg( temperatureSensorTaskID );
+	bdb_RegisterCommissioningStatusCB(commissioningStatus);
+	
+	bdb_RegisterForFilterNwkDescCB(filterNwkDesc);
+	bdb_StartCommissioning(BDB_COMMISSIONING_MODE_NWK_STEERING);
+	
+//	zcl_registerClusterOptionList(ENDPOINT, 1, options);
   
   	EA=1;
-  	clusterTemperatureMeasurementeInit();
+ // 	clusterTemperatureMeasurementeInit();
 	powerClusterInit(temperatureSensorTaskID);
  	identifyInit(temperatureSensorTaskID);
 	//ZMacSetTransmitPower(TX_PWR_PLUS_19);
@@ -143,7 +152,12 @@ uint16 temperatureSensorEventLoop( uint8 task_id, uint16 events ){
 					if (zclSampleSw_NwkState == DEV_END_DEVICE || zclSampleSw_NwkState == DEV_ROUTER){
 						fastBlinkOff();
 					}
+					break;
+				case AF_DATA_CONFIRM_CMD:
+					 APS_FragmenHandleDataConfirm((afDataConfirm_t *)MSGpkt);
+					break;
 		       default:
+				   MSGpkt->hdr.event = 0;
         		  break;
       		}
 
@@ -375,6 +389,22 @@ static ZStatus_t handleClusterCommands( zclIncoming_t *pInMsg ){
   return ( stat );
 }
 
+volatile uint8 tmp = 0;
+
+static void commissioningStatus(bdbCommissioningModeMsg_t *bdbCommissioningModeMsg) {
+	if (bdbCommissioningModeMsg->bdbCommissioningMode == BDB_COMMISSIONING_NWK_STEERING &&
+		bdbCommissioningModeMsg->bdbCommissioningStatus == BDB_COMMISSIONING_IN_PROGRESS){
+				return;
+		}
+	
+	tmp = 1;
+
+}
+
+static void filterNwkDesc(networkDesc_t *pBDBListNwk, uint8 count) {
+	if (pBDBListNwk->panId == 0xFFFF)
+		bdb_nwkDescFree(pBDBListNwk);
+}
 
 
 /****************************************************************************

@@ -1,11 +1,11 @@
 /******************************************************************************
   Filename:       OSAL_Clock.c
-  Revised:        $Date: 2012-02-26 13:15:18 -0800 (Sun, 26 Feb 2012) $
-  Revision:       $Revision: 29523 $
+  Revised:        $Date: 2014-06-30 16:38:56 -0700 (Mon, 30 Jun 2014) $
+  Revision:       $Revision: 39297 $
 
   Description:    OSAL Clock definition and manipulation functions.
 
-  Copyright 2008-2012 Texas Instruments Incorporated. All rights reserved.
+  Copyright 2008-2014 Texas Instruments Incorporated. All rights reserved.
 
   IMPORTANT: Your use of this Software is limited to those specific rights
   granted under the terms of a software license agreement between the user
@@ -147,8 +147,11 @@ extern uint32 macMcuPrecisionCount(void);
 /*********************************************************************
  * LOCAL VARIABLES
  */
-static uint32 previousMacTimerTick = 0;
-static uint16 remUsTicks = 0;
+#ifndef USE_ICALL
+  static uint32 previousMacTimerTick = 0;
+  static uint16 remUsTicks = 0;
+#endif /* !USE_ICALL */
+  
 static uint32 timeMSec = 0;
 
 // number of seconds since 0 hrs, 0 minutes, 0 seconds, on the
@@ -180,24 +183,30 @@ static void osalClockUpdate( uint32 elapsedMSec );
  *
  * @return  None.
  */
-void osalTimeUpdate( void ){
- 	halIntState_t intState;
- 	uint32 tmp;
- 	uint32 ticks320us;
- 	uint32 elapsedMSec = 0;
+void osalTimeUpdate( void )
+{
+#ifndef USE_ICALL
+  /* Note that when ICall is in use the OSAL tick is not updated
+   * in this fashion but rather through real OS timer tick. */
+  halIntState_t intState;
+  uint32 tmp;
+  uint32 ticks320us;
+  uint32 elapsedMSec = 0;
 
- 	HAL_ENTER_CRITICAL_SECTION(intState);
- 	// Get the free-running count of 320us timer ticks
- 	tmp = macMcuPrecisionCount();
-  	HAL_EXIT_CRITICAL_SECTION(intState);
+  HAL_ENTER_CRITICAL_SECTION(intState);
+  // Get the free-running count of 320us timer ticks
+  tmp = macMcuPrecisionCount();
+  HAL_EXIT_CRITICAL_SECTION(intState);
   
-  	if ( tmp != previousMacTimerTick ) {
-    	// Calculate the elapsed ticks of the free-running timer.
-    	ticks320us = (tmp - previousMacTimerTick) & 0xffffffffu;
+  if ( tmp != previousMacTimerTick )
+  {
+    // Calculate the elapsed ticks of the free-running timer.
+    ticks320us = (tmp - previousMacTimerTick) & 0xffffffffu;
 
-    	if (ticks320us >= TIMER_CLOCK_UPDATE ) {
-      		// Store the MAC Timer tick count for the next time through this function.
-      		previousMacTimerTick = tmp;
+    if (ticks320us >= TIMER_CLOCK_UPDATE )
+    {
+      // Store the MAC Timer tick count for the next time through this function.
+      previousMacTimerTick = tmp;
       
       /*
        * remUsTicks can have a maximum value of 24 (Since remusTicks got by mod 
@@ -205,22 +214,25 @@ void osalTimeUpdate( void ){
        * quotient of  CONVERT_320US_TO_MS_ELAPSED_REMAINDER() does not exceed 
        * 0xFFFF or 16 bit.
        */
-      		while(ticks320us >= COUNTER_TICK320US) {
-        		ticks320us  -= COUNTER_TICK320US;
-        		elapsedMSec += COUNTER_ELAPSEDMS;
-      		}
+      while(ticks320us >= COUNTER_TICK320US)
+      {
+        ticks320us  -= COUNTER_TICK320US;
+        elapsedMSec += COUNTER_ELAPSEDMS;
+      }
     
-      		// update converted number with remaining ticks from loop and the accumulated remainder from loop
-      		tmp = (ticks320us * 8) + remUsTicks;
+      // update converted number with remaining ticks from loop and the
+      // accumulated remainder from loop
+      tmp = (ticks320us * 8) + remUsTicks;
 
-      		// Convert the 320 us ticks into milliseconds and a remainder
-      		CONVERT_320US_TO_MS_ELAPSED_REMAINDER( tmp, elapsedMSec, remUsTicks );
+      // Convert the 320 us ticks into milliseconds and a remainder
+      CONVERT_320US_TO_MS_ELAPSED_REMAINDER( tmp, elapsedMSec, remUsTicks );
       
-      		// Update OSAL Clock and Timers
-      		osalClockUpdate( elapsedMSec );
-      		osalTimerUpdate( elapsedMSec );
-    	}
-  	}
+      // Update OSAL Clock and Timers
+      osalClockUpdate( elapsedMSec );
+      osalTimerUpdate( elapsedMSec );
+    }
+  }
+#endif /* USE_ICALL */
 }
 
 /*********************************************************************
@@ -250,7 +262,7 @@ static void osalClockUpdate( uint32 elapsedMSec )
   HAL_EXIT_CRITICAL_SECTION(intState);
 }
 
-#ifdef HAL_BOARD_CC2538
+#if defined HAL_BOARD_CC2538 || defined USE_ICALL
 /*********************************************************************
  * @fn      osalAdjustTimer
  *
@@ -271,7 +283,7 @@ void osalAdjustTimer(uint32 Msec )
   /* Enable SysTick interrupts */ 
   SysTickIntEnable(); 
 }
-#endif /* HAL_BOARD_CC2538 */
+#endif /* HAL_BOARD_CC2538 || USE_ICALL */
 
 /*********************************************************************
  * @fn      osal_setClock

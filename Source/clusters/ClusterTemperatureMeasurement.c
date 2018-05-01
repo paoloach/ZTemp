@@ -15,7 +15,6 @@ RESOURCES:
 #include "ioCC2530.h"
 #include "hal_mcu.h"
 #include "ZDApp.h"
-#include "hal_led.h"
 #include "ClusterTemperatureMeasurement.h"
 #include "OSAL_PwrMgr.h"
 
@@ -140,22 +139,22 @@ void temperatureClusterReadAttribute(zclAttrRec_t * statusRec) {
 	}
 	statusRec->accessControl = ACCESS_CONTROL_READ;
 	statusRec->status=ZCL_STATUS_SUCCESS;
-	switch(statusRec->attrId){
+	switch(statusRec->attr.attrId){
 		case ATTRID_TEMPERATURE_MEASURE_VALUE:
-			statusRec->dataType = ZCL_DATATYPE_INT16;
-			statusRec->dataPtr = (void *)&temperatureValue;
+			statusRec->attr.dataType = ZCL_DATATYPE_INT16;
+			statusRec->attr.dataPtr = (void *)&temperatureValue;
 		break;
 		case ATTRID_TEMPERATURE_MIN_MEASURE_VALUE:
-			statusRec->dataType = ZCL_DATATYPE_INT16;
-			statusRec->dataPtr = (void *)&minTemperatureValue;
+			statusRec->attr.dataType = ZCL_DATATYPE_INT16;
+			statusRec->attr.dataPtr = (void *)&minTemperatureValue;
 		break;
 		case ATTRID_TEMPERATURE_MAX_MEASURE_VALUE:
-			statusRec->dataType = ZCL_DATATYPE_INT16;
-			statusRec->dataPtr = (void *)&maxTemperatureValue;
+			statusRec->attr.dataType = ZCL_DATATYPE_INT16;
+			statusRec->attr.dataPtr = (void *)&maxTemperatureValue;
 		break;
 		case ATTRID_TEMPERATURE_TOLERANCE:
-			statusRec->dataType = ZCL_DATATYPE_UINT16;
-			statusRec->dataPtr = (void *)&toleranceTemperature;
+			statusRec->attr.dataType = ZCL_DATATYPE_UINT16;
+			statusRec->attr.dataPtr = (void *)&toleranceTemperature;
 		break;
 		default:
 			statusRec->status = ZCL_STATUS_UNSUPPORTED_ATTRIBUTE;
@@ -226,10 +225,10 @@ void finalizeReadTemp(void){
 	heigh = read();
 	
 	tempTemperatureValue = BUILD_UINT16(low,heigh);
-	temperatureValue = (tempTemperatureValue >> 4)*100;
+	temperatureValue = (tempTemperatureValue / 16)*100;
 	decTemperatureValue = (tempTemperatureValue & 0x0F)*100;
 	
-	temperatureValue += decTemperatureValue >> 4;
+	temperatureValue += decTemperatureValue / 16;
 	P1_5=0;  
 	P1_3=1;
 	osal_pwrmgr_task_state(temperatureSensorTaskID, PWRMGR_CONSERVE);

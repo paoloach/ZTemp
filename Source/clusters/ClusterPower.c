@@ -50,19 +50,19 @@ void powerClusterReadAttribute(zclAttrRec_t * attribute) {
 	}
 	attribute->accessControl = ACCESS_CONTROL_READ;
 	attribute->status = ZCL_STATUS_SUCCESS;
-	switch(attribute->attrId){
+	switch(attribute->attr.attrId){
 	case ATTRID_POWER_CFG_MAINS_VOLTAGE:
-		attribute->dataType = ZCL_DATATYPE_UINT16;
-		attribute->dataPtr = (void *)&mainVoltage;
+		attribute->attr.dataType = ZCL_DATATYPE_UINT16;
+		attribute->attr.dataPtr = (void *)&mainVoltage;
 		break;
 	case ATTRID_POWER_CFG_BATTERY_VOLTAGE:
 		readBatteryVolt();
-		attribute->dataType = ZCL_DATATYPE_UINT8;
-		attribute->dataPtr = (void *)&batteryVoltage;
+		attribute->attr.dataType = ZCL_DATATYPE_UINT8;
+		attribute->attr.dataPtr = (void *)&batteryVoltage;
 		break;
 	case ATTRID_POWER_CFG_BAT_ALARM_MASK:
-		attribute->dataType = ZCL_DATATYPE_BITMAP8;
-		attribute->dataPtr = (void *)&batteryAlarmMask;
+		attribute->attr.dataType = ZCL_DATATYPE_BITMAP8;
+		attribute->attr.dataPtr = (void *)&batteryAlarmMask;
 		break;	
 	default:
 		attribute->status = ZCL_STATUS_UNSUPPORTED_ATTRIBUTE;

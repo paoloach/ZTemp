@@ -1,12 +1,12 @@
 /**************************************************************************************
   Filename:       hal_sleep.c
-  Revised:        $Date: 2012-12-05 11:00:05 -0800 (Wed, 05 Dec 2012) $
-  Revision:       $Revision: 32448 $
+  Revised:        $Date: 2014-12-19 13:07:30 -0800 (Fri, 19 Dec 2014) $
+  Revision:       $Revision: 41556 $
 
   Description:    This module contains the HAL power management procedures for the CC2530.
 
 
-  Copyright 2006-2012 Texas Instruments Incorporated. All rights reserved.
+  Copyright 2006-2014 Texas Instruments Incorporated. All rights reserved.
 
   IMPORTANT: Your use of this Software is limited to those specific rights
   granted under the terms of a software license agreement between the user
@@ -45,8 +45,6 @@
 #include "hal_mcu.h"
 #include "hal_board.h"
 #include "hal_sleep.h"
-#include "hal_led.h"
-#include "hal_key.h"
 #include "mac_api.h"
 #include "OSAL.h"
 #include "OSAL_Timers.h"
@@ -58,10 +56,8 @@
 #include "mac_mcu.h"
 
 #ifndef ZG_BUILD_ENDDEVICE_TYPE
-# define ZG_BUILD_ENDDEVICE_TYPE TRUE
+# define ZG_BUILD_ENDDEVICE_TYPE FALSE
 #endif
-
-
 
 #if ZG_BUILD_ENDDEVICE_TYPE && defined (NWK_AUTO_POLL)
 #include "nwk_globals.h"
@@ -343,8 +339,6 @@ void halSleep( uint32 osal_timeout )
       HalKeyEnterSleep();
 #endif
 
-      /* use this to turn LEDs off during sleep */
-      HalLedEnterSleep();
       
       if(timeout > maxSleepLoopTime)
       {
@@ -407,20 +401,6 @@ void halSleep( uint32 osal_timeout )
         /* disable sleep timer interrupt */
         HAL_SLEEP_TIMER_DISABLE_INT();
 
-#ifdef HAL_SLEEP_DEBUG_LED
-        HAL_TURN_ON_LED3();
-#else
-        /* use this to turn LEDs back on after sleep */
-        HalLedExitSleep();
-#endif
-
-#if ((defined HAL_KEY) && (HAL_KEY == TRUE))
-        /* handle peripherals */
-        if(HalKeyExitSleep())
-        {
-          break; 
-        }
-#endif
 
       } while(timeout != 0);
 
@@ -564,4 +544,35 @@ HAL_ISR_FUNCTION(halSleepTimerIsr, ST_VECTOR)
   
   CLEAR_SLEEP_MODE();
   HAL_EXIT_ISR();
+}
+
+/**************************************************************************************************
+ * @fn          halSleepWait
+ *
+ * @brief       Perform a blocking wait for the specified number of microseconds.
+ *              Use assumptions about number of clock cycles needed for the various instructions.
+ *              This function assumes a 32 MHz clock.
+ *              NB! This function is highly dependent on architecture and compiler!
+ *
+ * input parameters
+ *
+ * @param       duration - Duration of wait in microseconds.
+ *
+ * output parameters
+ *
+ * None.
+ *
+ * @return      None.
+ **************************************************************************************************
+ */
+#pragma optimize=none
+void halSleepWait(uint16 duration)
+{
+  duration >>= 1;
+
+  while (duration-- > 0)
+  {
+    ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP;
+    ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP; ASM_NOP;
+  }
 }

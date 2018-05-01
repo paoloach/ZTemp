@@ -54,7 +54,6 @@
 #include "hal_drivers.h"
 #include "hal_key.h"
 #include "hal_lcd.h"
-#include "hal_led.h"
 #include "hal_sleep.h"
 #include "hal_timer.h"
 #include "hal_types.h"
@@ -73,20 +72,10 @@
 #include "hal_spi.h"
 #endif
 
-#define NO_TASK_ID 0xFF
-
 /**************************************************************************************************
  *                                      GLOBAL VARIABLES
  **************************************************************************************************/
 uint8 Hal_TaskID;
-
-uint8 registeredKeysTaskID=NO_TASK_ID;
-
-extern void HalLedUpdate( void ); /* Notes: This for internal only so it shouldn't be in hal_led.h */
-
-void setRegisteredKeysTaskID(uint8 taskId){
-	registeredKeysTaskID=taskId;
-}
 
 /**************************************************************************************************
  * @fn      Hal_Init
@@ -138,26 +127,12 @@ void HalDriverInit (void)
   HalAesInit();
 #endif
 
-  /* LCD */
-#if (defined HAL_LCD) && (HAL_LCD == TRUE)
-  HalLcdInit();
-#endif
-
-  /* LED */
-#if (defined HAL_LED) && (HAL_LED == TRUE)
-  HalLedInit();
-#endif
-
   /* UART */
 #if (defined HAL_UART) && (HAL_UART == TRUE)
   HalUARTInit();
 #endif
 
-  /* KEY */
-#if (defined HAL_KEY) && (HAL_KEY == TRUE)
-  HalKeyInit();
-#endif
-  
+
   /* SPI */
 #if (defined HAL_SPI) && (HAL_SPI == TRUE)
   HalSpiInit();
@@ -217,28 +192,7 @@ uint16 Hal_ProcessEvent( uint8 task_id, uint16 events )
   }
 #endif
 
-  if ( events & HAL_LED_BLINK_EVENT )
-  {
-#if (defined (BLINK_LEDS)) && (HAL_LED == TRUE)
-    HalLedUpdate();
-#endif /* BLINK_LEDS && HAL_LED */
-    return events ^ HAL_LED_BLINK_EVENT;
-  }
 
-  if (events & HAL_KEY_EVENT)
-  {
-#if (defined HAL_KEY) && (HAL_KEY == TRUE)
-    /* Check for keys */
-    HalKeyPoll();
-
-    /* if interrupt disabled, do next polling */
-    if (!Hal_KeyIntEnable)
-    {
-      osal_start_timerEx( Hal_TaskID, HAL_KEY_EVENT, 100);
-    }
-#endif
-    return events ^ HAL_KEY_EVENT;
-  }
 
 #if defined POWER_SAVING
   if ( events & HAL_SLEEP_TIMER_EVENT )
@@ -276,28 +230,27 @@ uint16 Hal_ProcessEvent( uint8 task_id, uint16 events )
  *
  * @return  None
  **************************************************************************************************/
-void Hal_ProcessPoll (){
+void Hal_ProcessPoll ()
+{
 #if defined( POWER_SAVING )
-	/* Allow sleep before the next OSAL event loop */
-	ALLOW_SLEEP_MODE();
+  /* Allow sleep before the next OSAL event loop */
+  ALLOW_SLEEP_MODE();
 #endif
-
-	/* UART Poll */
+  
+  /* UART Poll */
 #if (defined HAL_UART) && (HAL_UART == TRUE)
-	HalUARTPoll();
+  HalUARTPoll();
 #endif
-
-	/* SPI Poll */
+  
+  /* SPI Poll */
 #if (defined HAL_SPI) && (HAL_SPI == TRUE)
-	HalSpiPoll();
+  HalSpiPoll();
 #endif
 
-	/* HID poll */
+  /* HID poll */
 #if (defined HAL_HID) && (HAL_HID == TRUE)
-	usbHidProcessEvents();
+  usbHidProcessEvents();
 #endif
-
-
  
 }
 

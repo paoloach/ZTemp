@@ -56,8 +56,6 @@ extern "C"
 
 #define HAL_BUZZER_EVENT                    0x0080
 #define PERIOD_RSSI_RESET_EVT               0x0040
-#define HAL_LED_BLINK_EVENT                 0x0020
-#define HAL_KEY_EVENT                       0x0010
 
 #if defined POWER_SAVING
 #define HAL_SLEEP_TIMER_EVENT               0x0004
@@ -94,8 +92,6 @@ extern void Hal_ProcessPoll (void);
  * Initialize HW
  */
 extern void HalDriverInit (void);
-
-extern void setRegisteredKeysTaskID(uint8 registeredKeysTaskID);
 
 #ifdef __cplusplus
 }

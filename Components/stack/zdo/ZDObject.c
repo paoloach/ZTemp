@@ -1,12 +1,12 @@
 /**************************************************************************************************
   Filename:       ZDObject.c
-  Revised:        $Date: 2014-08-04 18:42:36 -0700 (Mon, 04 Aug 2014) $
-  Revision:       $Revision: 39656 $
+  Revised:        $Date: 2015-10-01 15:01:50 -0700 (Thu, 01 Oct 2015) $
+  Revision:       $Revision: 44513 $
 
   Description:    This is the Zigbee Device Object.
 
 
-  Copyright 2004-2014 Texas Instruments Incorporated. All rights reserved.
+  Copyright 2004-2015 Texas Instruments Incorporated. All rights reserved.
 
   IMPORTANT: Your use of this Software is limited to those specific rights
   granted under the terms of a software license agreement between the user
@@ -63,6 +63,12 @@
 #include "MT.h"
 #endif
 
+#include "bdb.h"
+
+#if !defined (DISABLE_GREENPOWER_BASIC_PROXY) && (ZG_BUILD_RTR_TYPE)
+#include "gp_common.h"
+#endif
+ 
 #if defined( LCD_SUPPORTED )
   #include "OnBoard.h"
 #endif
@@ -122,6 +128,8 @@ enum
  * EXTERNAL VARIABLES
  */
 
+extern bool  requestNewTrustCenterLinkKey;   
+   
 /*********************************************************************
  * EXTERNAL FUNCTIONS
  */
@@ -130,7 +138,6 @@ enum
  * LOCAL VARIABLES
  */
 static uint16 ZDOBuildBuf[26];  // temp area to build data without allocation
-static uint8 x;
 
 #if defined ( REFLECTOR )
 static ZDO_EDBind_t *ZDO_EDBind;     // Null when not used
@@ -210,7 +217,7 @@ static void ZDOManagedScan_Next( void )
     // Setup the defaults
     managedScanNextChannel  = 1;
 
-    while( managedScanNextChannel && (zgDefaultChannelList & managedScanNextChannel) == 0 )
+    while( managedScanNextChannel && (runtimeChannel & managedScanNextChannel) == 0 )
       managedScanNextChannel <<= 1;
 
     managedScanChannelMask = managedScanNextChannel;
@@ -232,7 +239,7 @@ static void ZDOManagedScan_Next( void )
       if ( managedScanTimesPerChannel == 0 )
       {
         managedScanNextChannel  <<= 1;
-        while( managedScanNextChannel && (zgDefaultChannelList & managedScanNextChannel) == 0 )
+        while( managedScanNextChannel && (runtimeChannel & managedScanNextChannel) == 0 )
           managedScanNextChannel <<= 1;
 
         if ( managedScanNextChannel == 0 )
@@ -269,15 +276,19 @@ static void ZDODeviceSetup( void )
   }
 }
 
+
+
+
 /*********************************************************************
  * @fn          ZDO_StartDevice
  *
- * @brief       This function starts a device in a network.
+ * @brief       This function starts a device in a network. Added distributed network for router devices
  *
  * @param       logicalType     - Device type to start
  *              startMode       - indicates mode of device startup
  *              beaconOrder     - indicates time betwen beacons
  *              superframeOrder - indicates length of active superframe
+ *              distributed     - indicates if the network will be formed
  *
  * @return      none
  */
@@ -297,15 +308,15 @@ void ZDO_StartDevice( byte logicalType, devStartModes_t startMode, byte beaconOr
   {
     if ( startMode == MODE_HARD )
     {
-      devState = DEV_COORD_STARTING;
-      ret = NLME_NetworkFormationRequest( zgConfigPANID, zgApsUseExtendedPANID, zgDefaultChannelList,
+      ZDApp_ChangeState( DEV_COORD_STARTING );
+      ret = NLME_NetworkFormationRequest( zgConfigPANID, zgApsUseExtendedPANID, runtimeChannel,
                                           zgDefaultStartingScanDuration, beaconOrder,
-                                          superframeOrder, false );
+                                          superframeOrder, false, false, 0 );
     }
     else if ( startMode == MODE_RESUME )
     {
       // Just start the coordinator
-      devState = DEV_COORD_STARTING;
+      ZDApp_ChangeState( DEV_COORD_STARTING );
       ret = NLME_StartRouterRequest( beaconOrder, beaconOrder, false );
     }
     else
@@ -320,60 +331,73 @@ void ZDO_StartDevice( byte logicalType, devStartModes_t startMode, byte beaconOr
   {
     if ( (startMode == MODE_JOIN) || (startMode == MODE_REJOIN) )
     {
-      devState = DEV_NWK_DISC;
+      if(APSME_IsDistributedSecurity() && (startMode != MODE_REJOIN))
+      {
+              ret = NLME_NetworkFormationRequest( zgConfigPANID, zgApsUseExtendedPANID, runtimeChannel,
+                                          zgDefaultStartingScanDuration, beaconOrder,
+                                          superframeOrder, false, true, osal_rand() );
+        
+      }
+      else
+      {
+        ZDApp_ChangeState( DEV_NWK_DISC );
 
-  #if defined( MANAGED_SCAN )
-      ZDOManagedScan_Next();
-      ret = NLME_NetworkDiscoveryRequest( managedScanChannelMask, BEACON_ORDER_15_MSEC );
-  #else
-      ret = NLME_NetworkDiscoveryRequest( zgDefaultChannelList, zgDefaultStartingScanDuration );
-    #if defined ( ZIGBEE_FREQ_AGILITY )
-      if ( !( ZDO_Config_Node_Descriptor.CapabilityFlags & CAPINFO_RCVR_ON_IDLE ) &&
+      #if defined( MANAGED_SCAN )
+        ZDOManagedScan_Next();
+        ret = NLME_NetworkDiscoveryRequest( managedScanChannelMask, BEACON_ORDER_15_MSEC );
+      #else
+        ret = NLME_NetworkDiscoveryRequest( runtimeChannel, zgDefaultStartingScanDuration );
+        #if defined ( ZIGBEE_FREQ_AGILITY )
+        if ( !( ZDO_Config_Node_Descriptor.CapabilityFlags & CAPINFO_RCVR_ON_IDLE ) &&
             ( ret == ZSuccess ) && ( ++discRetries == 4 ) )
-      {
-        // For devices with RxOnWhenIdle equals to FALSE, any network channel
-        // change will not be recieved. On these devices or routers that have
-        // lost the network, an active scan shall be conducted on the Default
-        // Channel list using the extended PANID to find the network. If the
-        // extended PANID isn't found using the Default Channel list, an scan
-        // should be completed using all channels.
-        zgDefaultChannelList = MAX_CHANNELS_24GHZ;
+        {
+          // For devices with RxOnWhenIdle equals to FALSE, any network channel
+          // change will not be recieved. On these devices or routers that have
+          // lost the network, an active scan shall be conducted on the Default
+          // Channel list using the extended PANID to find the network. If the
+          // extended PANID isn't found using the Default Channel list, an scan
+          // should be completed using all channels.
+          runtimeChannel = MAX_CHANNELS_24GHZ;
+        }
+        #endif // ZIGBEE_FREQ_AGILITY
+        #if defined ( ZIGBEE_COMMISSIONING )
+        if (startMode == MODE_REJOIN && scanCnt++ >= 5 )
+        {
+          // When ApsUseExtendedPanID is commissioned to a non zero value via
+          // application specific means, the device shall conduct an active scan
+          // on the Default Channel list and join the PAN with the same
+          // ExtendedPanID. If the PAN is not found, an scan should be completed
+          // on all channels.
+          // When devices rejoin the network and the PAN is not found from
+          runtimeChannel = MAX_CHANNELS_24GHZ;
+        }
+        #endif // ZIGBEE_COMMISSIONING
+      #endif
       }
-    #endif // ZIGBEE_FREQ_AGILITY
-    #if defined ( ZIGBEE_COMMISSIONING )
-      if (startMode == MODE_REJOIN && scanCnt++ >= 5 )
-      {
-        // When ApsUseExtendedPanID is commissioned to a non zero value via
-        // application specific means, the device shall conduct an active scan
-        // on the Default Channel list and join the PAN with the same
-        // ExtendedPanID. If the PAN is not found, an scan should be completed
-        // on all channels.
-        // When devices rejoin the network and the PAN is not found from
-        zgDefaultChannelList = MAX_CHANNELS_24GHZ;
-      }
-    #endif // ZIGBEE_COMMISSIONING
-  #endif
     }
     else if ( startMode == MODE_RESUME )
     {
       if ( logicalType == NODETYPE_ROUTER )
       {
-        ZMacScanCnf_t scanCnf;
-        devState = DEV_NWK_ORPHAN;
-
-        /* if router and nvram is available, fake successful orphan scan */
-        scanCnf.hdr.Status = ZSUCCESS;
-        scanCnf.ScanType = ZMAC_ORPHAN_SCAN;
-        scanCnf.UnscannedChannels = 0;
-        scanCnf.ResultListSize = 0;
-        nwk_ScanJoiningOrphan(&scanCnf);
+        uint16 panID;
+        
+        ZDApp_ChangeState( DEV_NWK_ORPHAN );
+        
+        // Stop the rejoin timeout
+        osal_stop_timerEx( NWK_TaskID, NWK_REJOIN_TIMEOUT_EVT );
+        ZMacGetReq( ZMacPanId, (uint8 *)&( panID ) );
+        
+        _NIB.nwkPanId = panID;
+        NLME_JoinConfirm(  _NIB.nwkPanId, ZSuccess );
 
         ret = ZSuccess;
       }
       else
       {
-        devState = DEV_NWK_ORPHAN;
-        ret = NLME_OrphanJoinRequest( zgDefaultChannelList,
+        ZDApp_ChangeState( DEV_NWK_ORPHAN );
+        //set timer for scan and rejoin
+        osal_start_timerEx( ZDAppTaskID, ZDO_REJOIN_BACKOFF, zgDefaultRejoinScan );
+        ret = NLME_OrphanJoinRequest( runtimeChannel,
                                       zgDefaultStartingScanDuration );
       }
     }
@@ -477,12 +501,12 @@ void ZDO_UpdateNwkStatus(devStates_t state)
 
     pItem = pItem->nextDesc;
   }
-  
+
   if ( zdpExternalStateTaskID != -1 )
-  {  
+  {
     zdoSendStateChangeMsg( state, zdpExternalStateTaskID );
   }
-  
+
   ZDAppNwkAddr.addr.shortAddr = NLME_GetShortAddr();
   (void)NLME_GetExtAddr();  // Load the saveExtAddr pointer.
 }
@@ -518,9 +542,9 @@ static void ZDO_RemoveEndDeviceBind( void )
 
 #if defined ( REFLECTOR )
 /*********************************************************************
- * @fn          ZDO_RemoveEndDeviceBind
+ * @fn          ZDO_SendEDBindRsp
  *
- * @brief       Remove the end device bind
+ * @brief       Send the end device bind response
  *
  * @param  none
  *
@@ -562,7 +586,7 @@ static void ZDO_SendEDBindRsp( byte TransSeq, zAddrType_t *dstAddr, byte Status,
 static byte ZDO_CompareClusterLists( byte numList1, uint16 *list1,
                           byte numList2, uint16 *list2, uint16 *pMatches )
 {
-  byte y;
+  byte x, y;
   uint16 z;
   byte numMatches = 0;
 
@@ -601,7 +625,7 @@ static byte ZDO_CompareClusterLists( byte numList1, uint16 *list1,
  */
 byte ZDO_AnyClusterMatches( byte ACnt, uint16 *AList, byte BCnt, uint16 *BList )
 {
-  byte y;
+  byte x, y;
 
   for ( x = 0; x < ACnt; x++ )
   {
@@ -620,6 +644,23 @@ byte ZDO_AnyClusterMatches( byte ACnt, uint16 *AList, byte BCnt, uint16 *BList )
 /*********************************************************************
  * Callback functions from ZDProfile
  */
+
+
+/*********************************************************************
+ * @fn          ZDO_ProcessNodeDescRsp
+ *
+ * @brief       This function processes the Node_Desc_rsp and request
+ *              Update the TC Link key if the TC supports it.
+ *
+ * @param       inMsg - incoming message
+ *
+ * @return      none
+ */
+void ZDO_ProcessNodeDescRsp ( zdoIncomingMsg_t *inMsg )
+{
+}
+
+
 
 /*********************************************************************
  * @fn          ZDO_ProcessNodeDescReq
@@ -693,33 +734,68 @@ void ZDO_ProcessPowerDescReq( zdoIncomingMsg_t *inMsg )
  *
  * @return      none
  */
-void ZDO_ProcessSimpleDescReq( zdoIncomingMsg_t *inMsg ){
-	SimpleDescriptionFormat_t *sDesc = NULL;
-	uint16 aoi = BUILD_UINT16( inMsg->asdu[0], inMsg->asdu[1] );
-	byte endPoint = inMsg->asdu[2];
-	byte free = false;
-	byte stat = ZDP_SUCCESS;
+void ZDO_ProcessSimpleDescReq( zdoIncomingMsg_t *inMsg )
+{
+  SimpleDescriptionFormat_t *sDesc = NULL;
+  uint16 aoi = BUILD_UINT16( inMsg->asdu[0], inMsg->asdu[1] );
+  byte endPoint = inMsg->asdu[2];
+  byte free = false;
+  byte stat = ZDP_SUCCESS;
 
-	if ( (endPoint == ZDO_EP) || (endPoint > MAX_ENDPOINTS) ){
-		stat = ZDP_INVALID_EP;
-	} else if ( aoi == ZDAppNwkAddr.addr.shortAddr ){
-    	free = afFindSimpleDesc( &sDesc, endPoint );
-    	if ( sDesc == NULL ){
-			stat = ZDP_NOT_ACTIVE;
-		}
-	} else {
-		if ( ZSTACK_ROUTER_BUILD ){
-			stat = ZDP_DEVICE_NOT_FOUND;
-		} else if ( ZSTACK_END_DEVICE_BUILD ) {
-			stat = ZDP_INVALID_REQTYPE;
-		}
-	}
+  if ( (endPoint == ZDO_EP) || (endPoint > MAX_ENDPOINTS) )
+  {
+    stat = ZDP_INVALID_EP;
+  }
+  else if ( aoi == ZDAppNwkAddr.addr.shortAddr )
+  {
+    free = afFindSimpleDesc( &sDesc, endPoint );
+    if ( sDesc == NULL )
+    {
+      stat = ZDP_NOT_ACTIVE;
+    }
+  }
+  else
+  {
+    if ( ZSTACK_ROUTER_BUILD )
+    {
+      //If child found, then no descriptor
+      if(AssocIsChild(aoi))
+      {
+        stat = ZDP_NO_DESCRIPTOR;
+      }
+      //Otherwise no device found
+      else
+      {
+        stat = ZDP_DEVICE_NOT_FOUND;
+      }
+    }
+    else if ( ZSTACK_END_DEVICE_BUILD )
+    {
+      stat = ZDP_INVALID_REQTYPE;
+    }
+  }
 
-	ZDP_SimpleDescMsg( inMsg, stat, sDesc );
+  ZDP_SimpleDescMsg( inMsg, stat, sDesc );
 
-	if ( free && sDesc ){
-		osal_mem_free( sDesc );
-	}
+  if ( free && sDesc )
+  {
+    osal_mem_free( sDesc );
+  }
+}
+
+/*********************************************************************
+ * @fn          ZDO_ProcessSimpleDescRsp
+ *
+ * @brief       This function processes and responds to the
+ *              Simple_Desc_rsp message.
+ *
+ * @param       inMsg - incoming message (request)
+ *
+ * @return      none
+ */
+void ZDO_ProcessSimpleDescRsp( zdoIncomingMsg_t *inMsg )
+{
+
 }
 
 /*********************************************************************
@@ -732,21 +808,33 @@ void ZDO_ProcessSimpleDescReq( zdoIncomingMsg_t *inMsg ){
  *
  * @return      none
  */
-void ZDO_ProcessActiveEPReq( zdoIncomingMsg_t *inMsg ){
-	byte cnt = 0;
-	uint16 aoi;
-	byte stat = ZDP_SUCCESS;
+void ZDO_ProcessActiveEPReq( zdoIncomingMsg_t *inMsg )
+{
+  byte cnt = 0;
+  uint16 aoi;
+  byte stat = ZDP_SUCCESS;
 
-	aoi = BUILD_UINT16( inMsg->asdu[0], inMsg->asdu[1] );
+  aoi = BUILD_UINT16( inMsg->asdu[0], inMsg->asdu[1] );
 
-	if ( aoi == NLME_GetShortAddr() ) {
-		cnt = afNumEndPoints() - 1;  // -1 for ZDO endpoint descriptor
-		afEndPoints( (uint8 *)ZDOBuildBuf, true );
-	} else {
-		stat = ZDP_INVALID_REQTYPE;
-	}
+  if ( aoi == NLME_GetShortAddr() )
+  {
+    cnt = afNumEndPoints() - 1;  // -1 for ZDO endpoint descriptor
+    afEndPoints( (uint8 *)ZDOBuildBuf, true );
+  }
+  else
+  {
+    if(ZG_BUILD_ENDDEVICE_TYPE)
+    {
+      stat = ZDP_INVALID_REQTYPE;
+    }
+    else
+    {
+      stat = ZDP_DEVICE_NOT_FOUND;
+    }
+  }
 
-	ZDP_ActiveEPRsp( inMsg->TransSeq, &(inMsg->srcAddr), stat,  aoi, cnt, (uint8 *)ZDOBuildBuf, inMsg->SecurityUse );
+  ZDP_ActiveEPRsp( inMsg->TransSeq, &(inMsg->srcAddr), stat,
+                  aoi, cnt, (uint8 *)ZDOBuildBuf, inMsg->SecurityUse );
 }
 
 /*********************************************************************
@@ -761,6 +849,8 @@ void ZDO_ProcessActiveEPReq( zdoIncomingMsg_t *inMsg ){
  */
 uint8 *ZDO_ConvertOTAClusters( uint8 cnt, uint8 *inBuf, uint16 *outList )
 {
+  uint8 x;
+
   for ( x = 0; x < cnt; x++ )
   {
     // convert ota format to internal
@@ -803,13 +893,24 @@ void ZDO_ProcessMatchDescReq( zdoIncomingMsg_t *inMsg )
   if ( ADDR_BCAST_NOT_ME == NLME_IsAddressBroadcast(aoi) )
   {
     ZDP_MatchDescRsp( inMsg->TransSeq, &(inMsg->srcAddr), ZDP_INVALID_REQTYPE,
-                          ZDAppNwkAddr.addr.shortAddr, 0, NULL, inMsg->SecurityUse );
+                          aoi, 0, NULL, inMsg->SecurityUse );
     return;
   }
   else if ( (ADDR_NOT_BCAST == NLME_IsAddressBroadcast(aoi)) && (aoi != ZDAppNwkAddr.addr.shortAddr) )
   {
+#if (ZG_BUILD_ENDDEVICE_TYPE)
+    if(ZG_DEVICE_ENDDEVICE_TYPE)
+    {    
     ZDP_MatchDescRsp( inMsg->TransSeq, &(inMsg->srcAddr), ZDP_INVALID_REQTYPE,
-                             ZDAppNwkAddr.addr.shortAddr, 0, NULL, inMsg->SecurityUse );
+                             aoi, 0, NULL, inMsg->SecurityUse );
+    }
+#else 
+    if (ZG_DEVICE_RTR_TYPE)
+    {
+    ZDP_MatchDescRsp( inMsg->TransSeq, &(inMsg->srcAddr), ZDP_DEVICE_NOT_FOUND,
+                             aoi, 0, NULL, inMsg->SecurityUse );
+    }
+#endif
     return;
   }
 
@@ -922,8 +1023,7 @@ void ZDO_ProcessMatchDescReq( zdoIncomingMsg_t *inMsg )
   }
   else
   {
-    // No match found
-    if (ADDR_NOT_BCAST == NLME_IsAddressBroadcast(aoi))
+    if (!inMsg->wasBroadcast)
     {
       // send response message with match length = 0
       ZDP_MatchDescRsp( inMsg->TransSeq, &(inMsg->srcAddr), ZDP_SUCCESS,
@@ -1002,7 +1102,7 @@ void ZDO_ProcessBindUnbindReq( zdoIncomingMsg_t *inMsg, ZDO_BindUnbindReq_t *pRe
         if ( bindNumOfEntries() < gNWK_MAX_BINDING_ENTRIES )
 #endif
         {
-#if !defined ( ZDP_BIND_SKIP_VALIDATION )
+#if defined ( ZDP_BIND_VALIDATION )
           uint16 nwkAddr;
 
           // Verifies that a valid NWK address exists for the device
@@ -1045,7 +1145,7 @@ void ZDO_ProcessBindUnbindReq( zdoIncomingMsg_t *inMsg, ZDO_BindUnbindReq_t *pRe
             // Notify to save info into NV
             ZDApp_NVUpdate();
           }
-#else // ZDP_BIND_SKIP_VALIDATION  is defined
+#else // ZDP_BIND_VALIDATION  is not Defined
           // Create binding entry first independently of existance of  valid NWK addres
           // if NWK address does not exist a request is sent out
           if ( APSME_BindRequest( pReq->srcEndpoint, pReq->clusterID,
@@ -1136,69 +1236,6 @@ void ZDO_ProcessServerDiscReq( zdoIncomingMsg_t *inMsg )
   }
 }
 
-#if defined ( ZIGBEE_CHILD_AGING )
-/*********************************************************************
- * @fn          ZDO_ProcessEndDeviceTimeoutReq
- *
- * @brief       This function processes and responds to the
- *              End_Device_Timeout_Req message.
- *
- * @param       inMsg  - incoming message (request)
- *
- * @return      none
- */
-void ZDO_ProcessEndDeviceTimeoutReq( zdoIncomingMsg_t *inMsg )
-{
-  uint8 stat = ZDP_SUCCESS;
-  uint8 *ieee = NULL;
-  uint16 reqTimeout;
-
-  // Only process this message if Child Table Management is enabled OR
-  // If message was broadcast OR multicast OR
-  // if the NWK src and the MAC src are not the same) drop message
-  if ( ( zgChildAgingEnable == FALSE ) ||
-       ( inMsg->wasBroadcast == TRUE ) ||
-       ( inMsg->srcAddr.addr.shortAddr != inMsg->macSrcAddr ) )
-  {
-    // the message does not come from a child, drop it
-    return;
-  }
-
-  ieee = inMsg->asdu;
-
-  reqTimeout = BUILD_UINT16( inMsg->asdu[Z_EXTADDR_LEN], inMsg->asdu[Z_EXTADDR_LEN+1] );
-
-  if ( ( ( reqTimeout < ZDO_MIN_REQ_TIMEOUT ) || ( reqTimeout > ZDO_MAX_REQ_TIMEOUT ) ) ||
-       ( ZSTACK_END_DEVICE_BUILD ) )
-  {
-    stat = ZDP_INVALID_REQTYPE;
-  }
-  else
-  {
-    associated_devices_t *pAssoc;
-
-    if ( ( ( pAssoc = AssocGetWithExt( ieee ) ) != NULL ) &&
-         ( ( pAssoc->nodeRelation >= CHILD_RFD ) &&
-           ( pAssoc->nodeRelation <= CHILD_RFD_RX_IDLE ) ) )
-    {
-      pAssoc->timeoutCounter = reqTimeout;
-      pAssoc->endDevKaTimeout = reqTimeout;
-
-      // Set event to save NV
-      ZDApp_NVUpdate();
-    }
-    else
-    {
-      stat = ZDP_DEVICE_NOT_FOUND;
-    }
-
-  }
-
-  ZDP_EndDeviceTimeoutRsp( inMsg->TransSeq, &(inMsg->srcAddr), stat,
-                           inMsg->SecurityUse );
-}
-#endif // ZIGBEE_CHILD_AGING
-
 /*********************************************************************
  * Call Back Functions from APS  - API
  */
@@ -1249,13 +1286,14 @@ void ZDO_EndDeviceTimeoutCB( void )
  */
 void ZDO_ProcessMgmtLqiReq( zdoIncomingMsg_t *inMsg )
 {
+  byte x;
   byte index;
   byte numItems;
   byte maxItems;
   ZDP_MgmtLqiItem_t* table = NULL;
   ZDP_MgmtLqiItem_t* item;
   neighborEntry_t    entry;
-  byte aItems;
+  byte aItems = 0;
   associated_devices_t *aDevice;
   AddrMgrEntry_t  nwkEntry;
   uint8 StartIndex = inMsg->asdu[0];
@@ -1263,11 +1301,18 @@ void ZDO_ProcessMgmtLqiReq( zdoIncomingMsg_t *inMsg )
   // Get the number of neighbor items
   NLME_GetRequest( nwkNumNeighborTableEntries, 0, &maxItems );
 
-  // Get the number of associated items
-  aItems = (uint8)AssocCount( PARENT, CHILD_FFD_RX_IDLE );
-
-  // Total number of items
-  maxItems += aItems;
+  //Routing devices uses assoc table, end devices don't
+  if ( ZG_DEVICE_RTR_TYPE )
+  {
+    // Get the number of associated items
+    aItems = (uint8)AssocCount( PARENT, CHILD_FFD_RX_IDLE );
+    // Total number of items
+    maxItems += aItems;
+  }
+  else
+  {
+    maxItems = 1;
+  }
 
   // Start with the supplied index
   if ( maxItems > StartIndex )
@@ -1276,8 +1321,10 @@ void ZDO_ProcessMgmtLqiReq( zdoIncomingMsg_t *inMsg )
 
     // limit the size of the list
     if ( numItems > ZDO_MAX_LQI_ITEMS )
+    {
       numItems = ZDO_MAX_LQI_ITEMS;
-
+    }
+    
     // Allocate the memory to build the table
     table = (ZDP_MgmtLqiItem_t*)osal_mem_alloc( (short)
               ( numItems * sizeof( ZDP_MgmtLqiItem_t ) ) );
@@ -1392,12 +1439,23 @@ void ZDO_ProcessMgmtLqiReq( zdoIncomingMsg_t *inMsg )
         // set ZDP_MgmtLqiItem_t fields
         item->panID    = entry.panId;
         osal_cpyExtAddr( item->extPanID, _NIB.extendedPANID );
-        osal_memset( item->extAddr, 0xFF, Z_EXTADDR_LEN );
+        osal_cpyExtAddr( item->extAddr, entry.neighborExtAddr);
         item->nwkAddr  = entry.neighborAddress;
-        item->rxOnIdle = ZDP_MGMT_BOOL_UNKNOWN;
-        item->relation = ZDP_MGMT_REL_UNKNOWN;
+
+        if ( ZG_DEVICE_RTR_TYPE )
+        {
+          item->rxOnIdle = ZDP_MGMT_BOOL_UNKNOWN;
+          item->relation = ZDP_MGMT_REL_UNKNOWN;
+          item->depth    = 0xFF;
+        }
+        else
+        {
+          //end devices knows this for sure
+          item->rxOnIdle = ZDP_MGMT_BOOL_RECEIVER_ON;
+          item->relation = ZDP_MGMT_REL_PARENT;
+          item->depth = _NIB.nodeDepth - 1;
+        }
         item->permit   = ZDP_MGMT_BOOL_UNKNOWN;
-        item->depth    = 0xFF;
         item->lqi      = entry.linkInfo.rxLqi;
 
         if ( item->nwkAddr == 0 )
@@ -1600,6 +1658,7 @@ void ZDO_FinishProcessingMgmtNwkDiscReq( void )
  */
 void ZDO_ProcessMgmtRtgReq( zdoIncomingMsg_t *inMsg )
 {
+  byte x;
   byte maxNumItems;
   byte numItems = 0;
   uint8 *pBuf = NULL;
@@ -1677,55 +1736,88 @@ void ZDO_ProcessMgmtRtgReq( zdoIncomingMsg_t *inMsg )
 /*********************************************************************
  * @fn          ZDO_ProcessMgmtBindReq
  *
- * @brief       This function finishes the processing of the Management Bind Request and generates the response.
+ * @brief       This function finishes the processing of the Management
+ *              Bind Request and generates the response.
  *
- *   Note:      This function will limit the number of items returned to ZDO_MAX_BIND_ITEMS items.
+ *   Note:      This function will limit the number of items returned
+ *              to ZDO_MAX_BIND_ITEMS items.
  *
  * @param       inMsg - incoming message (request)
  *
  * @return      none
  */
-void ZDO_ProcessMgmtBindReq( zdoIncomingMsg_t *inMsg ){
-	uint16 maxNumItems;
-	uint16 numItems;
-	uint8 *pBuf = NULL;
-	apsBindingItem_t *pList;
-	uint8 StartIndex = inMsg->asdu[0];
-	uint8 status;
+void ZDO_ProcessMgmtBindReq( zdoIncomingMsg_t *inMsg )
+{
+#if defined ( REFLECTOR )
+  byte x;
+  uint16 maxNumItems;
+  uint16 numItems;
+  uint8 *pBuf = NULL;
+  apsBindingItem_t *pList;
+  uint8 StartIndex = inMsg->asdu[0];
+  uint8 status;
 
-	// Get the number of table items
-	APSME_GetRequest( apsNumBindingTableEntries, 0, (byte*)(&maxNumItems) );
+  // Get the number of table items
+  APSME_GetRequest( apsNumBindingTableEntries, 0, (byte*)(&maxNumItems) );
 
-	if ( maxNumItems > StartIndex ) {
-		numItems = maxNumItems - StartIndex;    // Start at the passed in index
-	}  else  {
-		numItems = 0;
-	}
+  if ( maxNumItems > StartIndex )
+  {
+    numItems = maxNumItems - StartIndex;    // Start at the passed in index
+  }
+  else
+  {
+    numItems = 0;
+  }
 
-	// limit the size of the list
-	if ( numItems > ZDO_MAX_BIND_ITEMS ) {
-		numItems = ZDO_MAX_BIND_ITEMS;
-	}
+  // limit the size of the list
+  if ( numItems > ZDO_MAX_BIND_ITEMS )
+  {
+    numItems = ZDO_MAX_BIND_ITEMS;
+  }
 
   // Allocate the memory to build the table
-	if ( numItems && (pBuf = osal_mem_alloc( sizeof( apsBindingItem_t ) * numItems )) )  {
-		status = ZSuccess;
-		pList = (apsBindingItem_t *)pBuf;
-		for ( x = 0; x < numItems; x++ )  {
-			APSME_GetRequest( apsBindingTable, (x + StartIndex), (void*)pList );
-			pList++;
-		}
-	}  else  {
-		status = ZDP_NOT_PERMITTED;
-		numItems = 0;
-	}
+  if ( numItems )
+  {
+    pBuf = osal_mem_alloc( sizeof( apsBindingItem_t ) * numItems );
+    
+    if(pBuf != NULL)
+    {
+    
+      status = ZSuccess;
 
-	// Send response
-  	ZDP_MgmtBindRsp( inMsg->TransSeq, &(inMsg->srcAddr), status, (byte)maxNumItems, StartIndex,  (byte)numItems, (apsBindingItem_t *)pBuf, false );
+      // Convert buffer to list
+      pList = (apsBindingItem_t *)pBuf;
 
- 	if ( pBuf ) {
-    	osal_mem_free( pBuf );
-	}
+      // Loop through items and build list
+      for ( x = 0; x < numItems; x++ )
+      {
+        APSME_GetRequest( apsBindingTable, (x + StartIndex), (void*)pList );
+        pList++;
+      }
+    }
+    else
+    {
+      //No memory to allocate response, respond unsupported attribute
+      status = ZApsUnsupportedAttrib;
+      numItems = 0;
+    }
+  }
+  else
+  {
+    status = ZSuccess;
+  }
+
+  // Send response
+  ZDP_MgmtBindRsp( inMsg->TransSeq, &(inMsg->srcAddr), status, (byte)maxNumItems, StartIndex,
+                   (byte)numItems, (apsBindingItem_t *)pBuf, false );
+
+  if ( pBuf )
+  {
+    osal_mem_free( pBuf );
+  }
+#else
+  (void)inMsg;
+#endif
 }
 
 /*********************************************************************
@@ -1769,17 +1861,34 @@ void ZDO_ProcessMgmtLeaveReq( zdoIncomingMsg_t *inMsg )
   ZStatus_t       status;
   uint8           option;
   uint8 *msg = inMsg->asdu;
-
+  
   if ( ( AddrMgrExtAddrValid( msg ) == FALSE                 ) ||
        ( osal_ExtAddrEqual( msg, NLME_GetExtAddr() ) == TRUE )    )
   {
-    // Remove this device
-    req.extAddr = NULL;
+    if ( ( ZG_BUILD_COORDINATOR_TYPE ) && ( ZG_DEVICE_COORDINATOR_TYPE ) )
+    {
+      // Coordinator shall drop the leave request for itself
+      // section 3.6.1.10.3.1 R21
+      return;
+    }
+    else
+    {
+      // Remove this device
+      req.extAddr = NULL;
+    }
   }
   else
   {
     // Remove child device
     req.extAddr = msg;
+  }
+  if ( ( ZG_BUILD_ENDDEVICE_TYPE ) && ( ZG_DEVICE_ENDDEVICE_TYPE ) )
+  {
+    //Only the parent device can request to leave, otherwise silently discard the frame
+    if(inMsg->srcAddr.addr.shortAddr != _NIB.nwkCoordAddress)
+    {
+      return;
+    }
   }
 
   option = msg[Z_EXTADDR_LEN];
@@ -1794,16 +1903,30 @@ void ZDO_ProcessMgmtLeaveReq( zdoIncomingMsg_t *inMsg )
   }
 
   req.silent = FALSE;
-
-  status = NLME_LeaveReq( &req );
-
+  
+  //According to R21 spec sec2.4.3.3.5.2 Mgmt leave rsp must contain the status response from the nwk leave processing. 
+  //Latest discussion in Zigbee indicates that mgmt leave rsp due to an OTA command must have status=success (9/12/16)
+  status = ZSuccess;
+  
+  ZDP_MgmtLeaveRsp( inMsg->TransSeq, &(inMsg->srcAddr), status, FALSE );
+  
   if ( ZG_BUILD_ENDDEVICE_TYPE )
   {
     // Stop polling and get ready to reset
     NLME_SetPollRate( 0 );
+    NLME_SetResponseRate(0);
+    NLME_SetQueuedPollRate(0);
   }
-
-  ZDP_MgmtLeaveRsp( inMsg->TransSeq, &(inMsg->srcAddr), status, FALSE );
+  
+  NLME_LeaveReq(&req);
+  
+  if (! (option & ZDP_MGMT_LEAVE_REQ_REJOIN) )
+  {
+    if(req.extAddr == NULL)
+    {
+      bdb_setFN();
+    }
+  }
 }
 
 
@@ -1821,21 +1944,41 @@ void ZDO_ProcessMgmtPermitJoinReq( zdoIncomingMsg_t *inMsg )
 {
   uint8 stat;
   uint8 duration;
-  uint8 tcsig;
-
+#if (ZG_BUILD_COORDINATOR_TYPE)
+  if(ZG_DEVICE_COORDINATOR_TYPE)
+  {
+    //If zgAllowRemoteTCPolicyChange is set to FALSE, the request from other 
+    //devices cannot affect the  Trust Center policies
+    if((zgAllowRemoteTCPolicyChange == 0) && (inMsg->srcAddr.addr.shortAddr!= 0x0000))
+    {
+      return;
+    }
+  }
+#endif
+  
   duration = inMsg->asdu[ZDP_MGMT_PERMIT_JOIN_REQ_DURATION];
-  tcsig    = inMsg->asdu[ZDP_MGMT_PERMIT_JOIN_REQ_TC_SIG];
+  // Per R21 Spec this field is not longer relevant 2.4.3.3.7.2 (Mgmt_Permit_Joining_req Effect on Receipt)
+  //tcsig    = inMsg->asdu[ZDP_MGMT_PERMIT_JOIN_REQ_TC_SIG];
 
+  // Per R21 Spec this duration cannot last forever 2.4.3.3.7.2 (Mgmt_Permit_Joining_req Effect on Receipt)
+  if(duration == 0xFF)
+  {
+    duration = 0xFE;
+  }
+  
   // Set the network layer permit join duration
   stat = (byte) NLME_PermitJoiningRequest( duration );
 
+  //Handle the permit joining if running a distributed network
+  if(APSME_IsDistributedSecurity())
+  {
+    ZDSecMgrPermitJoining( duration );
+  }
+  
   // Handle the Trust Center Significance
   if ( ZG_SECURE_ENABLED && ZG_BUILD_COORDINATOR_TYPE && ZG_DEVICE_COORDINATOR_TYPE )
   {
-    if ( tcsig == TRUE )
-    {
-      ZDSecMgrPermitJoining( duration );
-    }
+    ZDSecMgrPermitJoining( duration );
   }
 
   // Send a response if unicast
@@ -1964,7 +2107,16 @@ void ZDO_ProcessDeviceAnnce( zdoIncomingMsg_t *inMsg )
   ZDO_DeviceAnnce_t Annce;
   AddrMgrEntry_t addrEntry;
   uint8 parentExt[Z_EXTADDR_LEN];
+#if !defined (DISABLE_GREENPOWER_BASIC_PROXY) && (ZG_BUILD_RTR_TYPE)
+  uint8 invalidIEEE[Z_EXTADDR_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+#endif
 
+  if ( (_NIB.nwkState != NWK_ROUTER) && (_NIB.nwkState != NWK_ENDDEVICE) )
+  {
+    // we aren’t stable, ignore the message
+    return;
+  }
+  
   // Parse incoming message
   ZDO_ParseDeviceAnnce( inMsg, &Annce );
 
@@ -1977,7 +2129,7 @@ void ZDO_ProcessDeviceAnnce( zdoIncomingMsg_t *inMsg )
     }
   }
 
-#if defined ( ZIGBEE_STOCHASTIC_ADDRESSING )
+#if defined ( ZIGBEEPRO )
   // Clean up the neighbor table
   nwkNeighborRemoveAllStranded();
 
@@ -1986,9 +2138,7 @@ void ZDO_ProcessDeviceAnnce( zdoIncomingMsg_t *inMsg )
   {
     return;
   }
-#endif
 
-#if defined ( ZIGBEE_STOCHASTIC_ADDRESSING )
   // Check for parent's address
   NLME_GetCoordExtAddr( parentExt );
   if ( osal_ExtAddrEqual( parentExt, Annce.extAddr ) )
@@ -2026,7 +2176,6 @@ void ZDO_ProcessDeviceAnnce( zdoIncomingMsg_t *inMsg )
         }
       }
 
-#if defined ( ZIGBEE_CHILD_AGING )
       // Remove the address from the SrcMatch table,
       // just in case the device was aged out by Child Management Table process
       if ( ( pNwkNotMyChildListDelete != NULL ) &&
@@ -2034,28 +2183,16 @@ void ZDO_ProcessDeviceAnnce( zdoIncomingMsg_t *inMsg )
       {
         pNwkNotMyChildListDelete( Annce.nwkAddr );
       }
-#endif // ZIGBEE_CHILD_AGING
-    }
-
-    if ( Annce.nwkAddr != NLME_GetShortAddr() )
-    {
-      // If an associated device is found with matched extended Address,
-      // update its short address
-      if ( AssocChangeNwkAddr( Annce.nwkAddr, Annce.extAddr ) )
-      {
-        // Set event to save NV
-        ZDApp_NVUpdate();
-      }
     }
   }
-
-  // Update the neighbor table
-  nwkNeighborUpdateNwkAddr( Annce.nwkAddr, Annce.extAddr );
 
   // Assume that the device has moved, remove existing routing entries
   RTG_RemoveRtgEntry( Annce.nwkAddr, 0 );
 
-#endif // ZIGBEE_STOCHASTIC_ADDRESSING
+  // Remove entry from neighborTable
+  nwkNeighborRemove( Annce.nwkAddr, _NIB.nwkPanId );
+
+#endif // ZIGBEEPRO
 
   // Fill in the extended address in address manager if we don't have it already.
   addrEntry.user = ADDRMGR_USER_DEFAULT;
@@ -2079,6 +2216,216 @@ void ZDO_ProcessDeviceAnnce( zdoIncomingMsg_t *inMsg )
       addrEntry.nwkAddr = Annce.nwkAddr;
       AddrMgrEntryUpdate( &addrEntry );
     }
+  }
+
+#if !defined (DISABLE_GREENPOWER_BASIC_PROXY) && (ZG_BUILD_RTR_TYPE)
+  if(ZG_DEVICE_RTR_TYPE)
+  {
+    // Check GP proxy table to update the entry if necesary
+    if( osal_memcmp( Annce.extAddr, invalidIEEE, Z_EXTADDR_LEN ) )
+    {
+      if( osal_get_timeoutEx( gp_TaskID, GP_PROXY_ALIAS_CONFLICT_TIMEOUT ) )
+      {
+        if ( osal_memcmp( &Annce, GP_aliasConflictAnnce, sizeof( ZDO_DeviceAnnce_t ) ) )
+        {
+          osal_stop_timerEx( gp_TaskID, GP_PROXY_ALIAS_CONFLICT_TIMEOUT );
+        }
+      }
+    }
+    else
+    {
+      if(GP_CheckAnnouncedDeviceGCB != NULL)
+      {
+        GP_CheckAnnouncedDeviceGCB( Annce.extAddr, Annce.nwkAddr );
+      }
+    }
+  }
+#endif
+}
+
+/*********************************************************************
+ * @fn          ZDO_ProcessParentAnnce
+ *
+ * @brief       This function processes a Parent annouce message.
+ *
+ * @param       inMsg - incoming message
+ *
+ * @return      none
+ */
+void ZDO_ProcessParentAnnce( zdoIncomingMsg_t *inMsg )
+{
+  ZDO_ParentAnnce_t *parentAnnce;
+  uint8 x;
+  uint8 childCount = 0;
+  uint32 localAge;
+
+  ZDO_ChildInfoList_t *listHead = NULL;
+  ZDO_ChildInfoList_t *listTail;
+  ZDO_ChildInfoList_t *newNode;
+
+  // Parse incoming message, memory is allocated by the parse function,
+  // it should be free after processing the message
+  parentAnnce = ZDO_ParseParentAnnce( inMsg );
+
+  if ( parentAnnce != NULL )
+  {
+    for ( x = 0; x < parentAnnce->numOfChildren; x++ )
+    {
+      associated_devices_t *dev_ptr;
+      localAge = 0xFFFFFFFF;
+
+      // If it's an End Device child
+      dev_ptr = AssocGetWithExt( parentAnnce->childInfo[x].extAddr );
+
+      if ( dev_ptr )
+      {
+        if ( dev_ptr->nodeRelation == CHILD_RFD ||
+             dev_ptr->nodeRelation == CHILD_RFD_RX_IDLE )
+        {
+          if ( dev_ptr->keepaliveRcv == TRUE )
+          {
+            localAge = dev_ptr->endDev.deviceTimeout - dev_ptr->timeoutCounter;
+          }
+
+          if ( localAge < parentAnnce->childInfo[x].age )
+          {
+            // Add one element to the list
+            newNode = (ZDO_ChildInfoList_t *)osal_mem_alloc( sizeof(ZDO_ChildInfoList_t) );
+
+            osal_cpyExtAddr( newNode->child.extAddr, parentAnnce->childInfo[x].extAddr );
+
+            newNode->child.age = localAge;
+
+            newNode->next = NULL;
+
+            if ( listHead == NULL )
+            {
+              // Initialize the head of the list
+              listHead = listTail = newNode;
+            }
+            else
+            {
+              // Add new element to the end
+              listTail->next = newNode;
+
+              listTail = listTail->next;
+            }
+
+            childCount++;
+          }
+          else
+          {
+            AssocRemove( parentAnnce->childInfo[x].extAddr );
+          }
+        }
+      }
+    }
+
+    // If the device has children that match some in the received list,
+    // it should send a unicast Parent_Annce_rsp message.
+    if ( childCount > 0 )
+    {
+      ZDO_ChildInfo_t *childInfo;
+      zAddrType_t dstAddr;
+
+      dstAddr.addrMode = (afAddrMode_t)Addr16Bit;
+      dstAddr.addr.shortAddr = inMsg->srcAddr.addr.shortAddr;
+
+      x = 0;
+
+      childInfo = (ZDO_ChildInfo_t *)osal_mem_alloc( childCount * sizeof(ZDO_ChildInfo_t) );
+
+      if ( childInfo != NULL )
+      {
+        // Copy the content of the link list into this buffer
+        while ( listHead != NULL )
+        {
+          listTail = listHead;
+
+          osal_cpyExtAddr( childInfo[x].extAddr,  listHead->child.extAddr );
+          childInfo[x].age = listHead->child.age;
+
+          x++;
+
+          listHead = listTail->next;
+
+          // Free this element of the link list
+          osal_mem_free( listTail );
+        }
+
+        ZDP_ParentAnnceRsp( (inMsg->TransSeq), dstAddr, childCount,
+                            ((uint8 *)childInfo), 0 );
+        
+        
+        osal_mem_free(childInfo);
+      }
+      else
+      {
+        while(listHead != NULL)
+        {
+          listTail = listHead;
+          listHead = listTail->next;
+
+          // Free this element of the link list
+          osal_mem_free( listTail );
+        }  
+      }
+    }
+    
+    // Free memory allocated by parsing function
+    osal_mem_free( parentAnnce );
+  }
+}
+
+/*********************************************************************
+ * @fn          ZDO_ProcessParentAnnceRsp
+ *
+ * @brief       This function processes a Parent annouce response message.
+ *
+ * @param       inMsg - incoming message
+ *
+ * @return      none
+ */
+void ZDO_ProcessParentAnnceRsp( zdoIncomingMsg_t *inMsg )
+{
+  ZDO_ParentAnnce_t *parentAnnce;
+  uint8 x;
+  uint32 localAge;
+
+  // Parse incoming message, memory is allocated by the parse function,
+  // it should be free after processing the message
+  parentAnnce = ZDO_ParseParentAnnce( inMsg );
+
+  if ( parentAnnce != NULL )
+  {
+    for ( x = 0; x < parentAnnce->numOfChildren; x++ )
+    {
+      associated_devices_t *dev_ptr;
+      localAge = 0xFFFFFFFF;
+
+      // If it's an End Device child
+      dev_ptr = AssocGetWithExt( parentAnnce->childInfo[x].extAddr );
+
+      if ( dev_ptr )
+      {
+        if ( dev_ptr->nodeRelation == CHILD_RFD ||
+             dev_ptr->nodeRelation == CHILD_RFD_RX_IDLE )
+        {
+          if ( dev_ptr->keepaliveRcv == TRUE )
+          {
+            localAge = dev_ptr->endDev.deviceTimeout - dev_ptr->timeoutCounter;
+          }
+
+          if ( localAge >= parentAnnce->childInfo[x].age )
+          {
+            AssocRemove( parentAnnce->childInfo[x].extAddr );
+          }
+        }
+      }
+    }
+
+    // Free memory allocated by parsing function
+    osal_mem_free( parentAnnce );
   }
 }
 
@@ -2123,6 +2470,7 @@ void ZDO_BuildSimpleDescBuf( uint8 *buf, SimpleDescriptionFormat_t *desc )
 }
 
 #if ( ZG_BUILD_COORDINATOR_TYPE )
+#ifdef ZDO_ENDDEVICEBIND_RESPONSE
 /*********************************************************************
  * @fn      ZDO_MatchEndDeviceBind()
  *
@@ -2255,6 +2603,7 @@ void ZDO_MatchEndDeviceBind( ZDEndDeviceBind_t *bindReq )
     ZDO_RemoveMatchMemory();
   }
 }
+#endif
 
 /*********************************************************************
  * @fn      ZDO_RemoveMatchMemory()
@@ -2531,6 +2880,7 @@ static void ZDO_EndDeviceBindMatchTimeoutCB( void )
  * ZDO MESSAGE PARSING API FUNCTIONS
  */
 
+#ifdef ZDO_ENDDEVICEBIND_RESPONSE
 /*********************************************************************
  * @fn          ZDO_ParseEndDeviceBindReq
  *
@@ -2587,6 +2937,7 @@ void ZDO_ParseEndDeviceBindReq( zdoIncomingMsg_t *inMsg, ZDEndDeviceBind_t *bind
     bindReq->numOutClusters = 0;
   }
 }
+#endif
 
 /*********************************************************************
  * @fn          ZDO_ParseBindUnbindReq
@@ -2878,6 +3229,7 @@ ZDO_MgmtLqiRsp_t *ZDO_ParseMgmtLqiRsp( zdoIncomingMsg_t *inMsg )
             sizeof( ZDO_MgmtLqiRsp_t ) + (neighborLqiCount * sizeof( ZDP_MgmtLqiItem_t )) );
   if ( pRsp )
   {
+    uint8 x;
     ZDP_MgmtLqiItem_t *pList = pRsp->list;
     pRsp->status = status;
     pRsp->neighborLqiEntries = neighborLqiEntries;
@@ -2951,6 +3303,7 @@ ZDO_MgmNwkDiscRsp_t *ZDO_ParseMgmNwkDiscRsp( zdoIncomingMsg_t *inMsg )
                                   + (networkListCount * sizeof( mgmtNwkDiscItem_t )) );
   if ( pRsp )
   {
+    uint8 x;
     mgmtNwkDiscItem_t *pList;
 
     pRsp->status = status;
@@ -3014,6 +3367,7 @@ ZDO_MgmtRtgRsp_t *ZDO_ParseMgmtRtgRsp( zdoIncomingMsg_t *inMsg )
           sizeof( ZDO_MgmtRtgRsp_t ) + (rtgListCount * sizeof( rtgItem_t )) );
   if ( pRsp )
   {
+    uint8 x;
     rtgItem_t *pList = pRsp->list;
     pRsp->status = status;
     pRsp->rtgCount = rtgCount;
@@ -3074,6 +3428,7 @@ ZDO_MgmtBindRsp_t *ZDO_ParseMgmtBindRsp( zdoIncomingMsg_t *inMsg )
           (sizeof ( ZDO_MgmtBindRsp_t ) + (bindingListCount * sizeof( apsBindingItem_t ))) );
   if ( pRsp )
   {
+    uint8 x;
     apsBindingItem_t *pList = pRsp->list;
     pRsp->status = status;
     pRsp->bindingCount = bindingCount;
@@ -3246,6 +3601,57 @@ void ZDO_ParseDeviceAnnce( zdoIncomingMsg_t *inMsg, ZDO_DeviceAnnce_t *pAnnce )
 }
 
 /*********************************************************************
+ * @fn          ZDO_ParseParentAnnce
+ *
+ * @brief       Parse Parent Announce and Parent Announce Rsp messages,
+ *              both messages have the same payload.
+ *
+ * @param       inMsg - Incoming message
+ *
+ * @return      a pointer to parsed response structure (NULL if not allocated).
+ *          This structure was allocated using osal_mem_alloc, so it must be freed
+ *          by the calling function [osal_mem_free()].
+ */
+ZDO_ParentAnnce_t *ZDO_ParseParentAnnce( zdoIncomingMsg_t *inMsg )
+{
+  ZDO_ParentAnnce_t *pRcvdMsg;
+  uint8 *msg;
+  uint8 numChildren;
+
+  msg = inMsg->asdu;
+  if ( inMsg->clusterID == Parent_annce_rsp)
+  {
+    *msg++;
+  }
+  numChildren = *msg++;
+
+  // Allocate a buffer big enough to handle the list
+  pRcvdMsg = (ZDO_ParentAnnce_t *)osal_mem_alloc(
+             (sizeof(ZDO_ParentAnnce_t) + (numChildren * sizeof(ZDO_ChildInfo_t))));
+
+  if ( pRcvdMsg )
+  {
+    uint8 x;
+    ZDO_ChildInfo_t *pList = pRcvdMsg->childInfo;
+
+    pRcvdMsg->numOfChildren = numChildren;
+
+    for ( x = 0; x < numChildren; x++ )
+    {
+      osal_cpyExtAddr( pList->extAddr, msg );
+      msg += Z_EXTADDR_LEN;
+
+      pList->age = osal_build_uint32( msg, 4 );
+      msg += 4;
+
+      pList++;
+    }
+  }
+
+  return ( pRcvdMsg );
+}
+
+/*********************************************************************
  * @fn          ZDO_ParseMgmtNwkUpdateNotify
  *
  * @brief       This function handles parsing of the incoming Management
@@ -3333,21 +3739,6 @@ void ZDO_ParseMgmtNwkUpdateReq( zdoIncomingMsg_t *inMsg, ZDO_MgmtNwkUpdateReq_t 
       pReq->nwkManagerAddr = BUILD_UINT16( msg[0], msg[1] );
     }
   }
-}
-
-/*********************************************************************
- * @fn          ZDO_ParseEndDeviceTimeoutRsp
- *
- * @brief       Parse the End_Device_Timeout_rsp message.
- *
- * @param       inMsg - incoming message.
- * @param       pRsp - place to put the parsed information.
- *
- * @return      none
- */
-void ZDO_ParseEndDeviceTimeoutRsp( zdoIncomingMsg_t *inMsg, uint16 *pRsp )
-{
-  *pRsp = inMsg->asdu[0];
 }
 
 /*********************************************************************

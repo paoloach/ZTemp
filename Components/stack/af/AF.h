@@ -1,7 +1,7 @@
 /**************************************************************************************************
   Filename:       AF.h
-  Revised:        $Date: 2014-05-14 13:17:12 -0700 (Wed, 14 May 2014) $
-  Revision:       $Revision: 38539 $
+  Revised:        $Date: 2014-11-04 10:53:36 -0800 (Tue, 04 Nov 2014) $
+  Revision:       $Revision: 40974 $
 
   Description:    This file contains the Application Framework definitions.
 
@@ -121,13 +121,14 @@ typedef struct
 } NodeDescriptorFormat_t;
 
 // Bit masks for the ServerMask.
-#define PRIM_TRUST_CENTER  0x01
-#define BKUP_TRUST_CENTER  0x02
-#define PRIM_BIND_TABLE    0x04
-#define BKUP_BIND_TABLE    0x08
-#define PRIM_DISC_TABLE    0x10
-#define BKUP_DISC_TABLE    0x20
-#define NETWORK_MANAGER    0x40
+#define PRIM_TRUST_CENTER        0x01
+#define BKUP_TRUST_CENTER        0x02
+#define PRIM_BIND_TABLE          0x04
+#define BKUP_BIND_TABLE          0x08
+#define PRIM_DISC_TABLE          0x10
+#define BKUP_DISC_TABLE          0x20
+#define NETWORK_MANAGER          0x40
+
 
 /*********************************************************************
  * Node Power Descriptor
@@ -245,7 +246,7 @@ typedef struct
   afAddrMode_t addrMode;
   uint8 endPoint;
   uint16 panId;  // used for the INTER_PAN feature
-} afAddrType_t;
+}  afAddrType_t;
 
 
 typedef struct
@@ -253,7 +254,8 @@ typedef struct
   osal_event_hdr_t hdr;     /* OSAL Message header */
   uint16 groupId;           /* Message's group ID - 0 if not set */
   uint16 clusterId;         /* Message's cluster ID */
-  afAddrType_t srcAddr;     /* Source Address, if endpoint is STUBAPS_INTER_PAN_EP it's an InterPAN message */
+  afAddrType_t srcAddr;     /* Source Address, if endpoint is STUBAPS_INTER_PAN_EP,
+                               it's an InterPAN message */
   uint16 macDestAddr;       /* MAC header destination short address */
   uint8 endPoint;           /* destination endpoint */
   uint8 wasBroadcast;       /* TRUE if network destination was a broadcast address */
@@ -293,6 +295,7 @@ typedef struct
 typedef struct
 {
   uint8 endPoint;
+  uint8 epType;
   uint8 *task_id;  // Pointer to location of the Application task ID.
   SimpleDescriptionFormat_t *simpleDesc;
   afNetworkLatencyReq_t latencyReq;
@@ -399,7 +402,8 @@ extern epList_t *epList;
  /*
   * afReflectError - APS will call this function for an error with a reflected data message.
   */
-  extern void afReflectError( uint8 dstAddrMode, uint16 dstAddr, uint8 endPoint, uint8 transID, ZStatus_t status );
+  extern void afReflectError( uint8 srcEP, uint8 dstAddrMode, uint16 dstAddr, uint8 dstEP,
+                              uint8 transID, ZStatus_t status );
 
  /*
   * afIncomingData - APS will call this function when an incoming

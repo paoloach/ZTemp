@@ -1,7 +1,7 @@
 /**************************************************************************************************
   Filename:       OSAL_Memory.c
-  Revised:        $Date: 2013-03-14 17:58:51 -0700 (Thu, 14 Mar 2013) $
-  Revision:       $Revision: 33490 $
+  Revised:        $Date: 2014-11-24 18:26:24 -0800 (Mon, 24 Nov 2014) $
+  Revision:       $Revision: 41234 $
 
   Description:    OSAL Heap Memory management functions. There is an Application Note that
                   should be read before studying and/or modifying this module:
@@ -42,6 +42,8 @@
  *                                          Includes
  * ------------------------------------------------------------------------------------------------
  */
+
+#include <stdlib.h>
 
 #include "comdef.h"
 #include "OSAL.h"
@@ -89,7 +91,7 @@
  * Adjust this size accordingly to accomodate application-specific changes including changing the
  * size of long-lived objects profiled by sample apps and long-lived objects added by application.
  */
-#if defined ZCL_KEY_ESTABLISH     // Attempt to capture worst-case for SE sample apps.
+#if defined ZCL_KEY_ESTABLISH_OLD // CBKE no longer uses long lived memory allocations.
 #define OSALMEM_LL_BLKSZ          (OSALMEM_ROUND(526) + (32 * OSALMEM_HDRSZ))
 #elif defined TC_LINKKEY_JOIN
 #define OSALMEM_LL_BLKSZ          (OSALMEM_ROUND(454) + (21 * OSALMEM_HDRSZ))
@@ -173,7 +175,7 @@ typedef union {
  * ------------------------------------------------------------------------------------------------
  */
 
-#if !defined ( ZBIT )
+#if !defined ( ZBIT ) && defined ewarm
 static __no_init osalMemHdr_t theHeap[MAXMEMHEAP / OSALMEM_HDRSZ];
 static __no_init osalMemHdr_t *ff1;  // First free block in the small-block bucket.
 #else
@@ -483,13 +485,8 @@ void *osal_mem_alloc( uint16 size )
 
   HAL_EXIT_CRITICAL_SECTION( intState );  // Re-enable interrupts.
 
-#if !defined ( ZBIT )
-#pragma diag_suppress=Pe767
-  HAL_ASSERT(((halDataAlign_t)hdr % sizeof(halDataAlign_t)) == 0);
-#pragma diag_default=Pe767
-#else
-  HAL_ASSERT(((halDataAlign_t)hdr % sizeof(halDataAlign_t)) == 0);
-#endif
+  HAL_ASSERT(((size_t)hdr % sizeof(halDataAlign_t)) == 0);
+
 #ifdef DPRINTF_OSALHEAPTRACE
   dprintf("osal_mem_alloc(%u)->%lx:%s:%u\n", size, (unsigned) hdr, fname, lnum);
 #endif /* DPRINTF_OSALHEAPTRACE */

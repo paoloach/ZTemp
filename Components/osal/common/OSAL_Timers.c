@@ -1,7 +1,7 @@
 /**************************************************************************************************
   Filename:       OSAL_Timers.c
-  Revised:        $Date: 2012-11-28 00:37:02 -0800 (Wed, 28 Nov 2012) $
-  Revision:       $Revision: 32329 $
+  Revised:        $Date: 2014-06-16 15:12:16 -0700 (Mon, 16 Jun 2014) $
+  Revision:       $Revision: 39036 $
 
   Description:    OSAL Timer definition and manipulation functions.
 
@@ -114,7 +114,8 @@ void osalDeleteTimer( osalTimerRec_t *rmTimer );
  *
  * @return
  */
-void osalTimerInit( void ){
+void osalTimerInit( void )
+{
   osal_systemClock = 0;
 }
 
@@ -130,50 +131,60 @@ void osalTimerInit( void ){
  *
  * @return  osalTimerRec_t * - pointer to newly created timer
  */
-osalTimerRec_t * osalAddTimer( uint8 task_id, uint16 event_flag, uint32 timeout ){
- 	osalTimerRec_t *newTimer;
- 	osalTimerRec_t *srchTimer;
+osalTimerRec_t * osalAddTimer( uint8 task_id, uint16 event_flag, uint32 timeout )
+{
+  osalTimerRec_t *newTimer;
+  osalTimerRec_t *srchTimer;
 
- 	// Look for an existing timer first
- 	newTimer = osalFindTimer( task_id, event_flag );
- 	if ( newTimer ) {
-		// Timer is found - update it.
-		newTimer->timeout.time32 = timeout;
+  // Look for an existing timer first
+  newTimer = osalFindTimer( task_id, event_flag );
+  if ( newTimer )
+  {
+    // Timer is found - update it.
+    newTimer->timeout.time32 = timeout;
 
-		return ( newTimer );
-	} else {
-		// New Timer
-		newTimer = osal_mem_alloc( sizeof( osalTimerRec_t ) );
+    return ( newTimer );
+  }
+  else
+  {
+    // New Timer
+    newTimer = osal_mem_alloc( sizeof( osalTimerRec_t ) );
 
-		if ( newTimer ) {
-			// Fill in new timer
-			newTimer->task_id = task_id;
-			newTimer->event_flag = event_flag;
-			newTimer->timeout.time32 = timeout;
-			newTimer->next = (void *)NULL;
-			newTimer->reloadTimeout = 0;
+    if ( newTimer )
+    {
+      // Fill in new timer
+      newTimer->task_id = task_id;
+      newTimer->event_flag = event_flag;
+      newTimer->timeout.time32 = timeout;
+      newTimer->next = (void *)NULL;
+      newTimer->reloadTimeout = 0;
 
-			// Does the timer list already exist
-			if ( timerHead == NULL ) {
-				// Start task list
-				timerHead = newTimer;
-			} else {
-				// Add it to the end of the timer list
-				srchTimer = timerHead;
+      // Does the timer list already exist
+      if ( timerHead == NULL )
+      {
+        // Start task list
+        timerHead = newTimer;
+      }
+      else
+      {
+        // Add it to the end of the timer list
+        srchTimer = timerHead;
 
-				// Stop at the last record
-				while ( srchTimer->next )
-					srchTimer = srchTimer->next;
+        // Stop at the last record
+        while ( srchTimer->next )
+          srchTimer = srchTimer->next;
 
-				// Add to the list
-				srchTimer->next = newTimer;
-			}
+        // Add to the list
+        srchTimer->next = newTimer;
+      }
 
-			return ( newTimer );
-		} else {
-			return ( (osalTimerRec_t *)NULL );
-		}
-	}
+      return ( newTimer );
+    }
+    else
+    {
+      return ( (osalTimerRec_t *)NULL );
+    }
+  }
 }
 
 /*********************************************************************
@@ -187,23 +198,27 @@ osalTimerRec_t * osalAddTimer( uint8 task_id, uint16 event_flag, uint32 timeout 
  *
  * @return  osalTimerRec_t *
  */
-osalTimerRec_t *osalFindTimer( uint8 task_id, uint16 event_flag ){
-	osalTimerRec_t *srchTimer;
+osalTimerRec_t *osalFindTimer( uint8 task_id, uint16 event_flag )
+{
+  osalTimerRec_t *srchTimer;
 
-	// Head of the timer list
-	srchTimer = timerHead;
+  // Head of the timer list
+  srchTimer = timerHead;
 
- 	// Stop when found or at the end
- 	while ( srchTimer ) {
- 		if ( srchTimer->event_flag == event_flag &&  srchTimer->task_id == task_id ) {
-			break;
-		}
+  // Stop when found or at the end
+  while ( srchTimer )
+  {
+    if ( srchTimer->event_flag == event_flag &&
+         srchTimer->task_id == task_id )
+    {
+      break;
+    }
 
- 		// Not this one, check another
-    	srchTimer = srchTimer->next;
-  	}
+    // Not this one, check another
+    srchTimer = srchTimer->next;
+  }
 
-	return ( srchTimer );
+  return ( srchTimer );
 }
 
 /*********************************************************************
@@ -216,12 +231,15 @@ osalTimerRec_t *osalFindTimer( uint8 task_id, uint16 event_flag ){
  *
  * @return  none
  */
-void osalDeleteTimer( osalTimerRec_t *rmTimer ){
- 	// Does the timer list really exist
- 	if ( rmTimer ) {
-		// Clear the event flag and osalTimerUpdate() will delete the timer from the list.
-		rmTimer->event_flag = 0;
-	}
+void osalDeleteTimer( osalTimerRec_t *rmTimer )
+{
+  // Does the timer list really exist
+  if ( rmTimer )
+  {
+    // Clear the event flag and osalTimerUpdate() will delete
+    // the timer from the list.
+    rmTimer->event_flag = 0;
+  }
 }
 
 /*********************************************************************
@@ -238,18 +256,19 @@ void osalDeleteTimer( osalTimerRec_t *rmTimer ){
  *
  * @return  SUCCESS, or NO_TIMER_AVAIL.
  */
-uint8 osal_start_timerEx( uint8 taskID, uint16 event_id, uint32 timeout_value ){
-	halIntState_t intState;
-	osalTimerRec_t *newTimer;
+uint8 osal_start_timerEx( uint8 taskID, uint16 event_id, uint32 timeout_value )
+{
+  halIntState_t intState;
+  osalTimerRec_t *newTimer;
 
-	HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
+  HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
 
-	// Add timer
-	newTimer = osalAddTimer( taskID, event_id, timeout_value );
+  // Add timer
+  newTimer = osalAddTimer( taskID, event_id, timeout_value );
 
-	HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+  HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
 
- 	return ( (newTimer != NULL) ? SUCCESS : NO_TIMER_AVAIL );
+  return ( (newTimer != NULL) ? SUCCESS : NO_TIMER_AVAIL );
 }
 
 /*********************************************************************
@@ -267,22 +286,24 @@ uint8 osal_start_timerEx( uint8 taskID, uint16 event_id, uint32 timeout_value ){
  *
  * @return  SUCCESS, or NO_TIMER_AVAIL.
  */
-uint8 osal_start_reload_timer( uint8 taskID, uint16 event_id, uint32 timeout_value ){
-	halIntState_t intState;
-	osalTimerRec_t *newTimer;
+uint8 osal_start_reload_timer( uint8 taskID, uint16 event_id, uint32 timeout_value )
+{
+  halIntState_t intState;
+  osalTimerRec_t *newTimer;
 
-	HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
+  HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
 
-	// Add timer
- 	newTimer = osalAddTimer( taskID, event_id, timeout_value );
- 	if ( newTimer ){
-		// Load the reload timeout value
- 		newTimer->reloadTimeout = timeout_value;
- 	}
+  // Add timer
+  newTimer = osalAddTimer( taskID, event_id, timeout_value );
+  if ( newTimer )
+  {
+    // Load the reload timeout value
+    newTimer->reloadTimeout = timeout_value;
+  }
 
-	HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+  HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
 
-	return ( (newTimer != NULL) ? SUCCESS : NO_TIMER_AVAIL );
+  return ( (newTimer != NULL) ? SUCCESS : NO_TIMER_AVAIL );
 }
 
 /*********************************************************************
@@ -299,21 +320,23 @@ uint8 osal_start_reload_timer( uint8 taskID, uint16 event_id, uint32 timeout_val
  *
  * @return  SUCCESS or INVALID_EVENT_ID
  */
-uint8 osal_stop_timerEx( uint8 task_id, uint16 event_id ){
- 	halIntState_t intState;
- 	osalTimerRec_t *foundTimer;
+uint8 osal_stop_timerEx( uint8 task_id, uint16 event_id )
+{
+  halIntState_t intState;
+  osalTimerRec_t *foundTimer;
 
- 	HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
+  HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
 
- 	// Find the timer to stop
- 	foundTimer = osalFindTimer( task_id, event_id );
- 	if ( foundTimer ){
- 		osalDeleteTimer( foundTimer );
-	}
+  // Find the timer to stop
+  foundTimer = osalFindTimer( task_id, event_id );
+  if ( foundTimer )
+  {
+    osalDeleteTimer( foundTimer );
+  }
 
- 	HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+  HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
 
-	return ( (foundTimer != NULL) ? SUCCESS : INVALID_EVENT_ID );
+  return ( (foundTimer != NULL) ? SUCCESS : INVALID_EVENT_ID );
 }
 
 /*********************************************************************
@@ -326,22 +349,24 @@ uint8 osal_stop_timerEx( uint8 task_id, uint16 event_id ){
  *
  * @return  Return the timer's tick count if found, zero otherwise.
  */
-uint32 osal_get_timeoutEx( uint8 task_id, uint16 event_id ){
- 	halIntState_t intState;
- 	uint32 rtrn = 0;
- 	osalTimerRec_t *tmr;
+uint32 osal_get_timeoutEx( uint8 task_id, uint16 event_id )
+{
+  halIntState_t intState;
+  uint32 rtrn = 0;
+  osalTimerRec_t *tmr;
 
- 	HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
+  HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
 
- 	tmr = osalFindTimer( task_id, event_id );
+  tmr = osalFindTimer( task_id, event_id );
 
- 	if ( tmr ){
-		rtrn = tmr->timeout.time32;
- 	}
+  if ( tmr )
+  {
+    rtrn = tmr->timeout.time32;
+  }
 
- 	HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+  HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
 
-	return rtrn;
+  return rtrn;
 }
 
 /*********************************************************************
@@ -353,25 +378,27 @@ uint32 osal_get_timeoutEx( uint8 task_id, uint16 event_id ){
  *
  * @return  uint8 - number of timers
  */
-uint8 osal_timer_num_active( void ){
-	halIntState_t intState;
-	uint8 num_timers = 0;
- 	osalTimerRec_t *srchTimer;
+uint8 osal_timer_num_active( void )
+{
+  halIntState_t intState;
+  uint8 num_timers = 0;
+  osalTimerRec_t *srchTimer;
 
- 	HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
+  HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
 
- 	// Head of the timer list
- 	srchTimer = timerHead;
+  // Head of the timer list
+  srchTimer = timerHead;
 
- 	// Count timers in the list
- 	while ( srchTimer != NULL ){
- 		num_timers++;
-		srchTimer = srchTimer->next;
- 	}
+  // Count timers in the list
+  while ( srchTimer != NULL )
+  {
+    num_timers++;
+    srchTimer = srchTimer->next;
+  }
 
-	HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+  HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
 
-	return num_timers;
+  return num_timers;
 }
 
 /*********************************************************************
@@ -383,92 +410,119 @@ uint8 osal_timer_num_active( void ){
  *
  * @return  none
  *********************************************************************/
-void osalTimerUpdate( uint32 updateTime ){
- 	halIntState_t intState;
- 	osalTimerRec_t *srchTimer;
- 	osalTimerRec_t *prevTimer;
+void osalTimerUpdate( uint32 updateTime )
+{
+  halIntState_t intState;
+  osalTimerRec_t *srchTimer;
+  osalTimerRec_t *prevTimer;
 
- 	osalTime_t timeUnion;
- 	timeUnion.time32 = updateTime;
+  osalTime_t timeUnion;
+  timeUnion.time32 = updateTime;
 
- 	HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
- 	// Update the system time
- 	osal_systemClock += updateTime;
- 	HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+  HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
+  // Update the system time
+  osal_systemClock += updateTime;
+  HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
 
- 	// Look for open timer slot
- 	if ( timerHead != NULL ) {
- 		// Add it to the end of the timer list
- 		srchTimer = timerHead;
- 		prevTimer = (void *)NULL;
+  // Look for open timer slot
+  if ( timerHead != NULL )
+  {
+    // Add it to the end of the timer list
+    srchTimer = timerHead;
+    prevTimer = (void *)NULL;
 
- 		// Look for open timer slot
-    	while ( srchTimer ){
- 			osalTimerRec_t *freeTimer = NULL;
+    // Look for open timer slot
+    while ( srchTimer )
+    {
+      osalTimerRec_t *freeTimer = NULL;
 
-      		HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
+      HAL_ENTER_CRITICAL_SECTION( intState );  // Hold off interrupts.
 
-			// To minimize time in this critical section, avoid 32-bit math
-      		if ((timeUnion.time16[1] == 0) && (timeUnion.time8[1] == 0)) {
-				// If upper 24 bits are zero, check lower 8 bits for roll over
-        		if (srchTimer->timeout.time8[0] >= timeUnion.time8[0]){
-					// 8-bit math
-          			srchTimer->timeout.time8[0] -= timeUnion.time8[0];
-        		} else {
-          			// 32-bit math
-          			if (srchTimer->timeout.time32 > timeUnion.time32) {
-            			srchTimer->timeout.time32 -= timeUnion.time32;
-          			} else {
-            			srchTimer->timeout.time32 = 0;
-          			}
-        		}
-      		} else {
-          		// 32-bit math
-        		if (srchTimer->timeout.time32 > timeUnion.time32) {
-          			srchTimer->timeout.time32 -= timeUnion.time32;
-        		} else {
-          			srchTimer->timeout.time32 = 0;
-        		}
-      		}
+      // To minimize time in this critical section, avoid 32-bit math
+      if ((timeUnion.time16[1] == 0) && (timeUnion.time8[1] == 0))
+      {
+        // If upper 24 bits are zero, check lower 8 bits for roll over
+        if (srchTimer->timeout.time8[0] >= timeUnion.time8[0])
+        {
+          // 8-bit math
+          srchTimer->timeout.time8[0] -= timeUnion.time8[0];
+        }
+        else
+        {
+          // 32-bit math
+          if (srchTimer->timeout.time32 > timeUnion.time32)
+          {
+            srchTimer->timeout.time32 -= timeUnion.time32;
+          }
+          else
+          {
+            srchTimer->timeout.time32 = 0;
+          }
+        }
+      }
+      else
+      {
+          // 32-bit math
+        if (srchTimer->timeout.time32 > timeUnion.time32)
+        {
+          srchTimer->timeout.time32 -= timeUnion.time32;
+        }
+        else
+        {
+          srchTimer->timeout.time32 = 0;
+        }
+      }
 
-      		// Check for reloading
-      		if ( (srchTimer->timeout.time16[0] == 0) && (srchTimer->timeout.time16[1] == 0) && (srchTimer->reloadTimeout) && (srchTimer->event_flag) ) {
-        		// Notify the task of a timeout
-        		osal_set_event( srchTimer->task_id, srchTimer->event_flag );
+      // Check for reloading
+      if ( (srchTimer->timeout.time16[0] == 0) && (srchTimer->timeout.time16[1] == 0) &&
+           (srchTimer->reloadTimeout) && (srchTimer->event_flag) )
+      {
+        // Notify the task of a timeout
+        osal_set_event( srchTimer->task_id, srchTimer->event_flag );
 
-        		// Reload the timer timeout value
-        		srchTimer->timeout.time32 = srchTimer->reloadTimeout;
-      		}
+        // Reload the timer timeout value
+        srchTimer->timeout.time32 = srchTimer->reloadTimeout;
+      }
 
-      		// When timeout or delete (event_flag == 0)
-      		if ( ((srchTimer->timeout.time16[0] == 0) && (srchTimer->timeout.time16[1] == 0)) ||  (srchTimer->event_flag == 0) ) {
-        		// Take out of list
-        		if ( prevTimer == NULL ) {
-          			timerHead = srchTimer->next;
-        		} else{
-          			prevTimer->next = srchTimer->next;
-        		}
-		        // Setup to free memory
-        		freeTimer = srchTimer;
+      // When timeout or delete (event_flag == 0)
+      if ( ((srchTimer->timeout.time16[0] == 0) && (srchTimer->timeout.time16[1] == 0)) ||
+            (srchTimer->event_flag == 0) )
+      {
+        // Take out of list
+        if ( prevTimer == NULL )
+        {
+          timerHead = srchTimer->next;
+        }
+        else
+        {
+          prevTimer->next = srchTimer->next;
+        }
 
-        		// Next
-        		srchTimer = srchTimer->next;
-      		} else {
-        		// Get next
-        		prevTimer = srchTimer;
-        		srchTimer = srchTimer->next;
-      		}
+        // Setup to free memory
+        freeTimer = srchTimer;
 
-      		HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+        // Next
+        srchTimer = srchTimer->next;
+      }
+      else
+      {
+        // Get next
+        prevTimer = srchTimer;
+        srchTimer = srchTimer->next;
+      }
 
-      		if ( freeTimer ) {
-        		if ( (freeTimer->timeout.time16[0] == 0) && (freeTimer->timeout.time16[1] == 0) ) {
-          			osal_set_event( freeTimer->task_id, freeTimer->event_flag );
-        		}
-        		osal_mem_free( freeTimer );
-      		}
-    	}
-  	}
+      HAL_EXIT_CRITICAL_SECTION( intState );   // Re-enable interrupts.
+
+      if ( freeTimer )
+      {
+        if ( (freeTimer->timeout.time16[0] == 0) && (freeTimer->timeout.time16[1] == 0) )
+        {
+          osal_set_event( freeTimer->task_id, freeTimer->event_flag );
+        }
+        osal_mem_free( freeTimer );
+      }
+    }
+  }
 }
 
 #ifdef POWER_SAVING
@@ -481,22 +535,24 @@ void osalTimerUpdate( uint32 updateTime ){
  *
  * @return  none
  *********************************************************************/
-void osal_adjust_timers( void ){
-	 //Deprecated for CC2530 and CC2430 SoC.
-	/*
-	uint32 eTime;
+void osal_adjust_timers( void )
+{
+  uint32 eTime;
 
- 	if ( timerHead != NULL ) {
-		// Compute elapsed time (msec)
- 		eTime = TimerElapsed() / TICK_COUNT;
+  if ( timerHead != NULL )
+  {
+    // Compute elapsed time (msec)
+    eTime = TimerElapsed() / TICK_COUNT;
 
-		if ( eTime ){
-			osalTimerUpdate( eTime );
-		}
-	}
-	*/
+    if ( eTime )
+    {
+      osalTimerUpdate( eTime );
+    }
+  }
 }
+#endif /* POWER_SAVING */
 
+#if defined POWER_SAVING || defined USE_ICALL
 /*********************************************************************
  * @fn      osal_next_timeout
  *
@@ -509,31 +565,37 @@ void osal_adjust_timers( void ){
  *
  * @return  none
  *********************************************************************/
-uint32 osal_next_timeout( void ){
-	uint32 nextTimeout;
- 	osalTimerRec_t *srchTimer;
+uint32 osal_next_timeout( void )
+{
+  uint32 nextTimeout;
+  osalTimerRec_t *srchTimer;
 
-	if ( timerHead != NULL ) {
-		// Head of the timer list
-		srchTimer = timerHead;
-		nextTimeout = OSAL_TIMERS_MAX_TIMEOUT;
+  if ( timerHead != NULL )
+  {
+    // Head of the timer list
+    srchTimer = timerHead;
+    nextTimeout = OSAL_TIMERS_MAX_TIMEOUT;
 
-		// Look for the next timeout timer
-		while ( srchTimer != NULL ) {
-			if (srchTimer->timeout.time32 < nextTimeout) {
-				nextTimeout = srchTimer->timeout.time32;
-			}
-			// Check next timer
-      		srchTimer = srchTimer->next;
-    	}
-  	} else {
-		// No timers
-    	nextTimeout = 0;
-  	}
+    // Look for the next timeout timer
+    while ( srchTimer != NULL )
+    {
+      if (srchTimer->timeout.time32 < nextTimeout)
+      {
+        nextTimeout = srchTimer->timeout.time32;
+      }
+      // Check next timer
+      srchTimer = srchTimer->next;
+    }
+  }
+  else
+  {
+    // No timers
+    nextTimeout = 0;
+  }
 
-  	return ( nextTimeout );
+  return ( nextTimeout );
 }
-#endif // POWER_SAVING
+#endif // POWER_SAVING || USE_ICALL
 
 /*********************************************************************
  * @fn      osal_GetSystemClock()
@@ -544,8 +606,9 @@ uint32 osal_next_timeout( void ){
  *
  * @return  local clock in milliseconds
  */
-uint32 osal_GetSystemClock( void ){
-	return ( osal_systemClock );
+uint32 osal_GetSystemClock( void )
+{
+  return ( osal_systemClock );
 }
 
 /*********************************************************************

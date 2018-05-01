@@ -1,4 +1,6 @@
 gEDA/*.sch~
+CC2530DB/EndDeviceDB/*
+CC2530DB/EndDeviceEB/*
 # Object files
 *.wsdt
 *.dbgdt

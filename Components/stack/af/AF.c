@@ -1,7 +1,7 @@
 /**************************************************************************************************
   Filename:       AF.c
-  Revised:        $Date: 2014-06-30 16:29:17 -0700 (Mon, 30 Jun 2014) $
-  Revision:       $Revision: 39295 $
+  Revised:        $Date: 2014-11-04 10:53:36 -0800 (Tue, 04 Nov 2014) $
+  Revision:       $Revision: 40974 $
 
   Description:    Application Framework - Device Description helper functions
 
@@ -56,6 +56,11 @@
 
 #if defined ( INTER_PAN )
   #include "stub_aps.h"
+#endif
+
+#include "bdb.h" 
+#if (BDB_TOUCHLINK_CAPABILITY_ENABLED==1)
+  #include "bdb_tlCommissioning.h"
 #endif
 
 /*********************************************************************
@@ -137,20 +142,43 @@ void afInit( void )
  * @return  Pointer to epList_t on success, NULL otherwise.
  */
 epList_t *afRegisterExtended( endPointDesc_t *epDesc, pDescCB descFn, pApplCB applFn ){
-  epList_t *ep = osal_mem_alloc(sizeof(epList_t));
+    epList_t *ep = osal_mem_alloc(sizeof(epList_t));
 
-  if (ep != NULL) {
-    ep->nextDesc = epList;
-    epList = ep;
-    ep->epDesc = epDesc;
-    ep->pfnDescCB = descFn;
-    ep->apsfCfg.frameDelay = APSF_DEFAULT_INTERFRAME_DELAY;
-    ep->apsfCfg.windowSize = APSF_DEFAULT_WINDOW_SIZE;
-    ep->flags = eEP_AllowMatch;  // Default to allow Match Descriptor.
-    ep->pfnApplCB = applFn;
-  }
+    if (ep != NULL) {
+        ep->nextDesc = epList;
+        epList = ep;
+        ep->epDesc = epDesc;
+        ep->pfnDescCB = descFn;
+        ep->apsfCfg.frameDelay = APSF_DEFAULT_INTERFRAME_DELAY;
+        ep->apsfCfg.windowSize = APSF_DEFAULT_WINDOW_SIZE;
+        ep->flags = eEP_AllowMatch;  // Default to allow Match Descriptor.
+        ep->pfnApplCB = applFn;
+    
+      #if (BDB_FINDING_BINDING_CAPABILITY_ENABLED==1) 
+        //Make sure we add at least one application endpoint
+        if ((epDesc->endPoint != 0)  || (epDesc->endPoint < BDB_ZIGBEE_RESERVED_ENDPOINTS_START)) {
+            bdb_HeadEpDescriptorList = epList;
+            ep->epDesc->epType = bdb_zclFindingBindingEpType(ep->epDesc);
+        }
 
-  return ep;
+      #endif
+  #if defined ( BDB_TL_INITIATOR ) || defined ( BDB_TL_TARGET )
+        // find the first empty entry in the device info table
+        for ( uint8 i = 0; i < 5; i++ ) {
+            if ( touchLinkSubDevicesTbl[i] == NULL ){
+                touchLinkSubDevicesTbl[i] = osal_mem_alloc(sizeof(bdbTLDeviceInfo_t));
+                if ( touchLinkSubDevicesTbl[i] != NULL ) {
+                    touchLinkSubDevicesTbl[i]->deviceID = epDesc->simpleDesc->AppDeviceId;
+                    touchLinkSubDevicesTbl[i]->endpoint = epDesc->simpleDesc->EndPoint;
+                    touchLinkSubDevicesTbl[i]->profileID = epDesc->simpleDesc->AppProfId;
+                    touchLinkSubDevicesTbl[i]->version = epDesc->simpleDesc->AppDevVer;
+                    break;
+                }
+            }
+        }
+  #endif  // BDB_TL_INITIATOR || BDB_TL_TARGET
+    }
+    return ep;
 }
 
 /*********************************************************************
@@ -167,11 +195,11 @@ epList_t *afRegisterExtended( endPointDesc_t *epDesc, pDescCB descFn, pApplCB ap
  *          afStatus_INVALID_PARAMETER - duplicate endpoint
  */
 afStatus_t afRegister( endPointDesc_t *epDesc ){
-	if (afFindEndPointDescList(epDesc->endPoint)){  // Look for duplicate endpoint.
-    	return afStatus_INVALID_PARAMETER;
-	}
+	if (afFindEndPointDescList(epDesc->endPoint)) { // Look for duplicate endpoint.
+        return afStatus_INVALID_PARAMETER;
+    }
 
-	return ((NULL == afRegisterExtended(epDesc, NULL, NULL)) ? afStatus_MEM_FAIL : afStatus_SUCCESS);
+    return ((NULL == afRegisterExtended(epDesc, NULL, NULL)) ? afStatus_MEM_FAIL : afStatus_SUCCESS);
 }
 
 /*********************************************************************
@@ -287,21 +315,23 @@ void afDataConfirm( uint8 endPoint, uint8 transID, ZStatus_t status )
  * @brief       This function will generate the Reflect Error message to
  *              the application.
  *
+ * @param       srcEP - Source Endpoint
  * @param       dstAddrMode - mode of dstAdd - 0 - normal short addr, 1 - group Address
  * @param       dstAddr - intended destination
- * @param       endPoint - confirm end point
+ * @param       dstEP - Destination Endpoint
  * @param       transID - transaction ID from APSDE_DATA_REQUEST
  * @param       status - status of APSDE_DATA_REQUEST
  *
  * @return      none
  */
-void afReflectError( uint8 dstAddrMode, uint16 dstAddr, uint8 endPoint, uint8 transID, ZStatus_t status )
+void afReflectError( uint8 srcEP, uint8 dstAddrMode, uint16 dstAddr, uint8 dstEP,
+                     uint8 transID, ZStatus_t status )
 {
   endPointDesc_t *epDesc;
   afReflectError_t *msgPtr;
 
   // Find the endpoint description
-  epDesc = afFindEndPointDesc( endPoint );
+  epDesc = afFindEndPointDesc( srcEP );
   if ( epDesc == NULL )
     return;
 
@@ -312,7 +342,7 @@ void afReflectError( uint8 dstAddrMode, uint16 dstAddr, uint8 endPoint, uint8 tr
     // Build the Data Confirm message
     msgPtr->hdr.event = AF_REFLECT_ERROR_CMD;
     msgPtr->hdr.status = status;
-    msgPtr->endpoint = endPoint;
+    msgPtr->endpoint = dstEP;
     msgPtr->transID = transID;
     msgPtr->dstAddrMode = dstAddrMode;
     msgPtr->dstAddr = dstAddr;
@@ -555,160 +585,227 @@ static void afBuildMSGIncoming( aps_FrameFormat_t *aff, endPointDesc_t *epDesc,
  * @return  afStatus_t - See previous definition of afStatus_... types.
  */
 uint8 AF_DataRequestDiscoverRoute = DISC_ROUTE_NETWORK;
-afStatus_t AF_DataRequest( afAddrType_t *dstAddr, endPointDesc_t *srcEP,  uint16 cID, uint16 len, uint8 *buf, uint8 *transID, uint8 options, uint8 radius ){
-	pDescCB pfnDescCB;
-	ZStatus_t stat;
-	APSDE_DataReq_t req;
-	afDataReqMTU_t mtu;
-	epList_t *pList;
+afStatus_t AF_DataRequest( afAddrType_t *dstAddr, endPointDesc_t *srcEP,
+                           uint16 cID, uint16 len, uint8 *buf, uint8 *transID,
+                           uint8 options, uint8 radius )
+{
+  pDescCB pfnDescCB;
+  ZStatus_t stat;
+  APSDE_DataReq_t req;
+  afDataReqMTU_t mtu;
+  epList_t *pList;
 
-	// Verify source end point
-	if ( srcEP == NULL ){
-		return afStatus_INVALID_PARAMETER;
-	}
+  // Verify source end point
+  if ( srcEP == NULL )
+  {
+    return afStatus_INVALID_PARAMETER;
+  }
 
 #if !defined( REFLECTOR )
-	if ( dstAddr->addrMode == afAddrNotPresent ){
-		return afStatus_INVALID_PARAMETER;
-	}
+  if ( dstAddr->addrMode == afAddrNotPresent )
+  {
+    return afStatus_INVALID_PARAMETER;
+  }
 #endif
+  
+  // copy the addressing mode, to get the length of the packet
+  mtu.aps.addressingMode = dstAddr->addrMode; 
 
-  	// Check if route is available before sending data
-	if ( options & AF_LIMIT_CONCENTRATOR  ){
-		if ( dstAddr->addrMode != afAddr16Bit ){
-			return afStatus_INVALID_PARAMETER;
-    	}
+  // Check if route is available before sending data
+  if ( options & AF_LIMIT_CONCENTRATOR  )
+  {
+    if ( dstAddr->addrMode != afAddr16Bit )
+    {
+      return ( afStatus_INVALID_PARAMETER );
+    }
 
-    	// First, make sure the destination is not its self, then check for an existing route.
-    	if ( (dstAddr->addr.shortAddr != NLME_GetShortAddr()) && (RTG_CheckRtStatus( dstAddr->addr.shortAddr, RT_ACTIVE, (MTO_ROUTE | NO_ROUTE_CACHE) ) != RTG_SUCCESS) ) {
-      		// A valid route to a concentrator wasn't found
-      		return ( afStatus_NO_ROUTE );
-    	}
-  	}
+    // First, make sure the destination is not its self, then check for an existing route.
+    if ( (dstAddr->addr.shortAddr != NLME_GetShortAddr())
+        && (RTG_CheckRtStatus( dstAddr->addr.shortAddr, RT_ACTIVE, (MTO_ROUTE | NO_ROUTE_CACHE) ) != RTG_SUCCESS) )
+    {
+      // A valid route to a concentrator wasn't found
+      return ( afStatus_NO_ROUTE );
+    }
+  }
 
-	// Validate broadcasting
-	if ( (dstAddr->addrMode == afAddr16Bit) || (dstAddr->addrMode == afAddrBroadcast) ){
-    	// Check for valid broadcast values
-    	if ( ADDR_NOT_BCAST != NLME_IsAddressBroadcast( dstAddr->addr.shortAddr )  ) {
-			// Force mode to broadcast
-			dstAddr->addrMode = afAddrBroadcast;
-    	} else {
-			// Address is not a valid broadcast type
-      		if ( dstAddr->addrMode == afAddrBroadcast ) {
-        		return afStatus_INVALID_PARAMETER;
-      		}
-    	}
-	} else if ( dstAddr->addrMode != afAddr64Bit && dstAddr->addrMode != afAddrGroup && dstAddr->addrMode != afAddrNotPresent ){
-    	return afStatus_INVALID_PARAMETER;
-  	}
+  // Validate broadcasting
+  if ( ( dstAddr->addrMode == afAddr16Bit     ) ||
+       ( dstAddr->addrMode == afAddrBroadcast )    )
+  {
+    // Check for valid broadcast values
+    if( ADDR_NOT_BCAST != NLME_IsAddressBroadcast( dstAddr->addr.shortAddr )  )
+    {
+      // Force mode to broadcast
+      dstAddr->addrMode = afAddrBroadcast;
+    }
+    else
+    {
+      // Address is not a valid broadcast type
+      if ( dstAddr->addrMode == afAddrBroadcast )
+      {
+        return afStatus_INVALID_PARAMETER;
+      }
+    }
+  }
+  else if ( dstAddr->addrMode != afAddr64Bit &&
+            dstAddr->addrMode != afAddrGroup &&
+            dstAddr->addrMode != afAddrNotPresent )
+  {
+    return afStatus_INVALID_PARAMETER;
+  }
 
-  	// Set destination address
-  	req.dstAddr.addrMode = dstAddr->addrMode;
-  	if ( dstAddr->addrMode == afAddr64Bit ){
-    	osal_cpyExtAddr( req.dstAddr.addr.extAddr, dstAddr->addr.extAddr );
-  	} else {
-    	req.dstAddr.addr.shortAddr = dstAddr->addr.shortAddr;
-  	}
+  // Set destination address
+  req.dstAddr.addrMode = dstAddr->addrMode;
+  if ( dstAddr->addrMode == afAddr64Bit )
+  {
+    osal_cpyExtAddr( req.dstAddr.addr.extAddr, dstAddr->addr.extAddr );
+  }
+  else
+  {
+    req.dstAddr.addr.shortAddr = dstAddr->addr.shortAddr;
+  }
 
-  	// This option is to use Wildcard ProfileID in outgoing packets
-	if ( options & AF_WILDCARD_PROFILEID ){
-    	req.profileID = ZDO_WILDCARD_PROFILE_ID;
-  	} else{
-		req.profileID = ZDO_PROFILE_ID;
+  // This option is to use Wildcard ProfileID in outgoing packets
+  if ( options & AF_WILDCARD_PROFILEID )
+  {
+    req.profileID = ZDO_WILDCARD_PROFILE_ID;
+  }
+  else
+  {
+    req.profileID = ZDO_PROFILE_ID;
 
-    	if ( (pfnDescCB = afGetDescCB( srcEP )) )  {
-      		uint16 *pID = (uint16 *)(pfnDescCB(AF_DESCRIPTOR_PROFILE_ID, srcEP->endPoint ));
-      		if ( pID ) {
-        		req.profileID = *pID;
-        		osal_mem_free( pID );
-      		}
-    	} else if ( srcEP->simpleDesc ) {
-			req.profileID = srcEP->simpleDesc->AppProfId;
-    	}
-	}
+    if ( (pfnDescCB = afGetDescCB( srcEP )) )
+    {
+      uint16 *pID = (uint16 *)(pfnDescCB(
+                                   AF_DESCRIPTOR_PROFILE_ID, srcEP->endPoint ));
+      if ( pID )
+      {
+        req.profileID = *pID;
+        osal_mem_free( pID );
+      }
+    }
+    else if ( srcEP->simpleDesc )
+    {
+      req.profileID = srcEP->simpleDesc->AppProfId;
+    }
+  }
 
-	req.txOptions = 0;
+  req.txOptions = 0;
 
-	if ( ( options & AF_ACK_REQUEST ) && ( req.dstAddr.addrMode != AddrBroadcast ) && ( req.dstAddr.addrMode != AddrGroup ) ) {
-    	req.txOptions |=  APS_TX_OPTIONS_ACK;
-  	}
+  if ( ( options & AF_ACK_REQUEST              ) &&
+       ( req.dstAddr.addrMode != AddrBroadcast ) &&
+       ( req.dstAddr.addrMode != AddrGroup     )    )
+  {
+    req.txOptions |=  APS_TX_OPTIONS_ACK;
+  }
 
-  	if ( options & AF_SKIP_ROUTING ) {
-    	req.txOptions |=  APS_TX_OPTIONS_SKIP_ROUTING;
-  	}
+  if ( options & AF_SKIP_ROUTING )
+  {
+    req.txOptions |=  APS_TX_OPTIONS_SKIP_ROUTING;
+  }
 
-	if ( options & AF_EN_SECURITY ) {
-    	req.txOptions |= APS_TX_OPTIONS_SECURITY_ENABLE;
-    	mtu.aps.secure = TRUE;
-  	} else {
-    	mtu.aps.secure = FALSE;
-  	}
+  if ( options & AF_EN_SECURITY )
+  {
+    req.txOptions |= APS_TX_OPTIONS_SECURITY_ENABLE;
+    mtu.aps.secure = TRUE;
+  }
+  else
+  {
+    mtu.aps.secure = FALSE;
+  }
 
-	if ( options & AF_PREPROCESS ) {
-		req.txOptions |=  APS_TX_OPTIONS_PREPROCESS;
-	}
+  if ( options & AF_PREPROCESS )
+  {
+    req.txOptions |=  APS_TX_OPTIONS_PREPROCESS;
+  }
 
-	mtu.kvp = FALSE;
+  mtu.kvp = FALSE;
 
-	if ( options & AF_SUPRESS_ROUTE_DISC_NETWORK ){
-		req.discoverRoute = DISC_ROUTE_INITIATE;
-  	} else {
-		req.discoverRoute = AF_DataRequestDiscoverRoute;
-	}
+  if ( options & AF_SUPRESS_ROUTE_DISC_NETWORK )
+  {
+    req.discoverRoute = DISC_ROUTE_INITIATE;
+  }
+  else
+  {
+    req.discoverRoute = AF_DataRequestDiscoverRoute;
+  }
 
-  	req.transID       = *transID;
-  	req.srcEP         = srcEP->endPoint;
-  	req.dstEP         = dstAddr->endPoint;
-  	req.clusterID     = cID;
-  	req.asduLen       = len;
-  	req.asdu          = buf;
-  	req.radiusCounter = radius;
+  req.transID       = *transID;
+  req.srcEP         = srcEP->endPoint;
+  req.dstEP         = dstAddr->endPoint;
+  req.clusterID     = cID;
+  req.asduLen       = len;
+  req.asdu          = buf;
+  req.radiusCounter = radius;
 #if defined ( INTER_PAN )
-  	req.dstPanId      = dstAddr->panId;
+  req.dstPanId      = dstAddr->panId;
 #endif // INTER_PAN
 
-	// Look if there is a Callback function registered for this endpoint
-  	// The callback is used to control the AF Transaction ID used when sending messages
-	pList = afFindEndPointDescList( srcEP->endPoint );
+  // Look if there is a Callback function registered for this endpoint
+  // The callback is used to control the AF Transaction ID used when sending messages
+  pList = afFindEndPointDescList( srcEP->endPoint );
 
-  	if ( ( pList != NULL ) && ( pList->pfnApplCB != NULL ) ){
-    	pList->pfnApplCB( &req );
-  	}
+  if ( ( pList != NULL ) && ( pList->pfnApplCB != NULL ) )
+  {
+    pList->pfnApplCB( &req );
+  }
 
 #if defined ( INTER_PAN )
-  	if ( StubAPS_InterPan( dstAddr->panId, dstAddr->endPoint ) ) {
-    	if ( len > INTERP_DataReqMTU() ) {
-      		stat = afStatus_INVALID_PARAMETER;
-    	} else{
-      		stat = INTERP_DataReq( &req );
-    	}
-  	} else
+  if ( StubAPS_InterPan( dstAddr->panId, dstAddr->endPoint ) )
+  {
+    if ( len > INTERP_DataReqMTU() )
+    {
+      stat = afStatus_INVALID_PARAMETER;
+    }
+    else
+    {
+      stat = INTERP_DataReq( &req );
+    }
+  }
+  else
 #endif // INTER_PAN
-	{
-    	if (len > afDataReqMTU( &mtu ) ) {
-			stat = apsfSendFragmented ? (*apsfSendFragmented)( &req ) : afStatus_INVALID_PARAMETER;
-    	} else {
-      		stat = APSDE_DataReq( &req );
-    	}
-  	}
+  {
+    if (len > afDataReqMTU( &mtu ) )
+    {
+      if (apsfSendFragmented)
+      {
+        stat = (*apsfSendFragmented)( &req );
+      }
+      else
+      {
+        stat = afStatus_INVALID_PARAMETER;
+      }
+    }
+    else
+    {
+      stat = APSDE_DataReq( &req );
+    }
+  }
 
-	/*
-   	  If this is an EndPoint-to-EndPoint message on the same device, it will not get added to the NWK databufs. So it will not go OTA and it will not get a 
-	  MACCB_DATA_CONFIRM_CMD callback. Thus it is necessary to generate the AF_DATA_CONFIRM_CMD here. Note that APSDE_DataConfirm() only generates one message with the first 
-	  in line TransSeqNumber, even on a multi message. Also note that a reflected msg will not have its confirmation generated here.
-    */
-	if ( (req.dstAddr.addrMode == Addr16Bit) && (req.dstAddr.addr.shortAddr == NLME_GetShortAddr()) ) {
-		afDataConfirm( srcEP->endPoint, *transID, stat );
-	}
+  /*
+   * If this is an EndPoint-to-EndPoint message on the same device, it will not
+   * get added to the NWK databufs. So it will not go OTA and it will not get
+   * a MACCB_DATA_CONFIRM_CMD callback. Thus it is necessary to generate the
+   * AF_DATA_CONFIRM_CMD here. Note that APSDE_DataConfirm() only generates one
+   * message with the first in line TransSeqNumber, even on a multi message.
+   * Also note that a reflected msg will not have its confirmation generated
+   * here.
+   */
+  if ( (req.dstAddr.addrMode == Addr16Bit) &&
+       (req.dstAddr.addr.shortAddr == NLME_GetShortAddr()) )
+  {
+    afDataConfirm( srcEP->endPoint, *transID, stat );
+  }
 
-	if ( stat == afStatus_SUCCESS ) {
-    	(*transID)++;
-  	}
+  if ( stat == afStatus_SUCCESS )
+  {
+    (*transID)++;
+  }
 
-  	return (afStatus_t)stat;
+  return (afStatus_t)stat;
 }
 
-#if defined ( ZIGBEE_SOURCE_ROUTING )
+#if defined ( ZIGBEEPRO )
 /*********************************************************************
  * @fn      AF_DataRequestSrcRtg
  *
@@ -764,7 +861,7 @@ afStatus_t AF_DataRequestSrcRtg( afAddrType_t *dstAddr, endPointDesc_t *srcEP,
   return status;
 }
 
-#endif
+#endif // ZIGBEEPRO
 
 /*********************************************************************
  * @fn      afFindEndPointDescList
@@ -977,20 +1074,22 @@ uint8 afSetMatch( uint8 ep, uint8 action )
  *
  * @return  number of endpoints
  */
-uint8 afNumEndPoints( void ){
-	epList_t *epSearch;
-	uint8 endpoints;
+uint8 afNumEndPoints( void )
+{
+  epList_t *epSearch;
+  uint8 endpoints;
 
-	// Start at the beginning
-	epSearch = epList;
-	endpoints = 0;
+  // Start at the beginning
+  epSearch = epList;
+  endpoints = 0;
 
-	while ( epSearch ){
-		endpoints++;
-		epSearch = epSearch->nextDesc;
-	}
+  while ( epSearch )
+  {
+    endpoints++;
+    epSearch = epSearch->nextDesc;
+  }
 
-	return ( endpoints );
+  return ( endpoints );
 }
 
 /*********************************************************************

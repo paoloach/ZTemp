@@ -157,8 +157,8 @@ void ZDConfig_UpdateNodeDescriptor( void )
   ZDO_Config_Node_Descriptor.MaxOutTransferSize[0] = LO_UINT16( MAX_TRANSFER_SIZE );
   ZDO_Config_Node_Descriptor.MaxOutTransferSize[1] = HI_UINT16( MAX_TRANSFER_SIZE );
 
-  // Server Mask
-  ZDO_Config_Node_Descriptor.ServerMask = 0;
+  // Set the current stack revision
+  ZDO_Config_Node_Descriptor.ServerMask |= (STACK_COMPLIANCE_CURRENT_REV << STACK_COMPLIANCE_CURRENT_REV_POS);
 
   // Descriptor Capability Field - extended active endpoint list and
   // extended simple descriptor are not supported.
@@ -191,9 +191,9 @@ void ZDConfig_UpdatePowerDescriptor( void )
     else
       ZDO_Config_Power_Descriptor.PowerMode = NODECURPWR_RCVR_STIM;
 
-    ZDO_Config_Power_Descriptor.AvailablePowerSources = NODEAVAILPWR_DISPOSE;
-    ZDO_Config_Power_Descriptor.CurrentPowerSource = NODEAVAILPWR_DISPOSE;
-    ZDO_Config_Power_Descriptor.CurrentPowerSourceLevel = NODEPOWER_LEVEL_100;
+    ZDO_Config_Power_Descriptor.AvailablePowerSources = NODEAVAILPWR_RECHARGE;
+    ZDO_Config_Power_Descriptor.CurrentPowerSource = NODEAVAILPWR_RECHARGE;
+    ZDO_Config_Power_Descriptor.CurrentPowerSourceLevel = NODEPOWER_LEVEL_66;
   }
 }
 
